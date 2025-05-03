@@ -11,6 +11,7 @@
 - [ ] rearrange the techniques so that the more likely ones will be executed first
 - [ ] implement techniques from here https://www.cyberciti.biz/faq/linux-determine-virtualization-technology-command/
 - [ ] implement techniques from virt-what
+- [ ] Make VM::PCI_VM_DEVICE_ID compatible with Windows
  
 QEMU default: 0x1234
 Intel: 0x8086
