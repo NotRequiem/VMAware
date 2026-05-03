@@ -5853,7 +5853,7 @@ public:
                 }
 
                 // burn cycles executing a random number of instructions in each loop iteration, so that the hypervisor doesn't know when to pause the counter thread
-                u64 seed = ct_seed;
+                seed = ct_seed;
                 seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&seed));
                 seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&v_post)) << 1;
                 seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&r_post)) << 2;
