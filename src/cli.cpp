@@ -143,6 +143,7 @@ private:
 };
 #endif
 
+#ifdef __VMAWARE_DEBUG__
 struct SHA256 {
     u8 buf[64] = {};   // message block buffer
     u32 len = 0;       // bytes currently in buf
@@ -320,6 +321,7 @@ static std::string compute_self_sha256() {
     }
     return out;
 }
+#endif
 
 [[noreturn]] static void help(void) {
     std::cout << 
