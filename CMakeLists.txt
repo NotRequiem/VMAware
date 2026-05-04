@@ -12,6 +12,10 @@ project(
     LANGUAGES CXX
 )
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
 # set C++ standard
 if(NOT DEFINED CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_STANDARD 20)
@@ -161,16 +165,11 @@ endif()
 include(GNUInstallDirs)
 
 if (NOT MSVC)
-    if(CMAKE_BUILD_TYPE MATCHES "Release")
-        install(TARGETS ${TARGET} DESTINATION /usr/bin)
-        install(FILES "src/vmaware.hpp" DESTINATION /usr/include)
-    else()
-        install(TARGETS ${TARGET} DESTINATION ${CMAKE_SOURCE_DIR})
-    endif()
+    install(TARGETS ${TARGET} DESTINATION bin)
+    install(FILES "src/vmaware.hpp" DESTINATION include)
 elseif(MSVC)
-    set(CMAKE_INSTALL_PREFIX "C:\\Program Files\\YourApplication")
-    install(TARGETS ${TARGET} RUNTIME DESTINATION "bin")
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install")
 
-    set(HEADER_INSTALL_PATH "C:\\Program Files (x86)\\YourLibrary\\include")
-    install(FILES "src/vmaware.hpp" DESTINATION "${HEADER_INSTALL_PATH}")
+    install(TARGETS ${TARGET} RUNTIME DESTINATION "bin")
+    install(FILES "src/vmaware.hpp" DESTINATION "include")
 endif()
