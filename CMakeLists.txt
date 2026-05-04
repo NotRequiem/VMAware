@@ -12,10 +12,6 @@ project(
     LANGUAGES CXX
 )
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-
 # set C++ standard
 if(NOT DEFINED CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_STANDARD 20)
@@ -23,12 +19,10 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# global compiler options
 if(MSVC)
     # Globally disable specific MSVC warnings from external headers
     add_compile_options(
-        /FS # if multiple cl.exe write to the same .pdb file
-        /wd4626  # deleted assignment
+        /wd4626  # deleted assignment 
         /wd4668  # undefined macro replaced with '0'
         /wd4820  # padding added after data member
         /wd5045  # Spectre mitigation notice
@@ -38,11 +32,14 @@ endif()
 
 # compiler flags
 if (MSVC)
-    # Visual Studio uses multi-config generators, so we must avoid CMAKE_BUILD_TYPE here
-    add_compile_options(/W4 /WX /EHsc)
+    set(CMAKE_CXX_FLAGS "/W4 /EHsc")
 else()
     # Linux and Apple
-    add_compile_options(-Wextra -Wall -Wconversion -Wdouble-promotion -Wno-unused-parameter -Wno-unused-function -Wno-sign-conversion -Werror)
+    set(CMAKE_CXX_FLAGS "-Wextra -Wall -Wextra -Wconversion -Wdouble-promotion -Wno-unused-parameter -Wno-unused-function -Wno-sign-conversion")
+endif()
+
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -lstdc++ -lm")
 endif()
 
 # find available compilers
@@ -58,90 +55,72 @@ if (LINUX)
         set(CMAKE_CXX_COMPILER "${GPP_EXECUTABLE}")
         get_filename_component(COMPILER_NAME ${GPP_EXECUTABLE} NAME)
     endif()
-elseif(MSVC)
-    set(COMPILER_NAME "MSVC")
 endif()
 
 message(STATUS "Compiler: ${COMPILER_NAME}")
 
 # fetch and set build type
 set(available_build_types Debug Release Dev_Release)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build (Debug or Release)" FORCE)
+endif()
 
 # Define preprocessor macros based on the build type
-# Use generator expressions so this works correctly with Visual Studio.
-add_compile_definitions(
-    $<$<CONFIG:Debug>:__VMAWARE_DEBUG__>
-    $<$<CONFIG:Release>:__VMAWARE_RELEASE__>
-)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(__VMAWARE_DEBUG__)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_definitions(__VMAWARE_RELEASE__)
+endif()
 
 # general variables
 set(PROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(BUILD_DIR "${PROJECT_DIR}/build")
 set(TARGET "vmaware")
 
 # debug/release CXX flag options
 if (MSVC)
-    message(STATUS "MSVC generator detected")
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+        message(STATUS "Build set to debug mode")
+    elseif(CMAKE_BUILD_TYPE MATCHES "Release")
+        message(STATUS "Build set to release mode")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /O2")
+    endif()
 elseif(APPLE)
-    message(STATUS "Apple platform detected")
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+        message(STATUS "Build set to debug mode")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fsanitize=address")
+    elseif(CMAKE_BUILD_TYPE MATCHES "Release")
+        message(STATUS "Build set to release mode")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g0 -O2 -march=native -mtune=native")
+    endif()
 elseif(LINUX)
-    message(STATUS "Linux platform detected")
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+        message(STATUS "Build set to debug mode")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -DDEBUG -O0 -fsanitize=address,leak")
+    elseif(CMAKE_BUILD_TYPE MATCHES "Dev_Release")
+        message(STATUS "Build set to development release mode")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g0 -O2 -mno-avx512f -mno-avx512bw -mno-avx512vl")
+    elseif(CMAKE_BUILD_TYPE MATCHES "Release")
+        message(STATUS "Build set to release mode")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g0 -O2")
+        if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -mtune=native")
+        elseif(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcpu=native")
+        endif()
+    endif()
 else()
     message(STATUS "Build set to release mode")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
 endif()
 
 # add executable
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BUILD_DIR}")
 add_executable(${TARGET} "src/cli.cpp")
-target_compile_features(${TARGET} PRIVATE cxx_std_20)
-
-# debug/release flags (MULTI-CONFIG SAFE)
-# Apply flags per-config using generator expressions
-
-# Debug (with sanitizers)
-target_compile_options(${TARGET} PRIVATE
-    $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-g;-DDEBUG;-O0;-fsanitize=address,leak>
-)
-
-target_link_options(${TARGET} PRIVATE
-    $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-fsanitize=address,leak>
-)
-
-# detect x86
-set(IS_X86 FALSE)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i[3-6]86")
-    set(IS_X86 TRUE)
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+    set_property(TARGET ${TARGET} PROPERTY CXX_STANDARD 20)
 endif()
-
-# Dev_Release
-if(IS_X86)
-    target_compile_options(${TARGET} PRIVATE
-        $<$<AND:$<CONFIG:Dev_Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-            -g0;-O2;-mno-avx512f;-mno-avx512bw;-mno-avx512vl
-        >
-    )
-else()
-    target_compile_options(${TARGET} PRIVATE
-        $<$<AND:$<CONFIG:Dev_Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-            -g0;-O2
-        >
-    )
-endif()
-
-# Release
-target_compile_options(${TARGET} PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-g0;-O2>
-)
-
-# Architecture-specific optimizations
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    target_compile_options(${TARGET} PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-march=native;-mtune=native>
-    )
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
-    target_compile_options(${TARGET} PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-mcpu=native>
-    )
-endif()
+set_property(TARGET ${TARGET} PROPERTY CXX_STANDARD_REQUIRED ON)
 
 # extra flags
 option(DEBUG_OUTPUT "Force __VMAWARE_DEBUG__ define" OFF)
@@ -151,25 +130,26 @@ endif()
 
 # CTest stuff
 include(CTest)
-if(BUILD_TESTING)
-    enable_testing()
-    set(ARGUMENTS "--all")
-    if(MSVC)
-        add_test(NAME executable COMMAND $<TARGET_FILE:${TARGET}> ${ARGUMENTS})
-    else()
-        add_test(NAME TARGET COMMAND $<TARGET_FILE:${TARGET}> ${ARGUMENTS})
-    endif()
+enable_testing()
+set(ARGUMENTS "--all")
+if(MSVC)
+    add_test(executable "${BUILD_DIR}/Release/${TARGET}")
+else()
+    add_test(NAME TARGET COMMAND "${BUILD_DIR}/${TARGET}" ${ARGUMENTS})
 endif()
 
 # install rules
-include(GNUInstallDirs)
-
 if (NOT MSVC)
-    install(TARGETS ${TARGET} DESTINATION bin)
-    install(FILES "src/vmaware.hpp" DESTINATION include)
+    if(CMAKE_BUILD_TYPE MATCHES "Release")
+        install(TARGETS ${TARGET} DESTINATION /usr/bin)
+        install(FILES "src/vmaware.hpp" DESTINATION /usr/include)
+    else()
+        install(TARGETS ${TARGET} DESTINATION ${CMAKE_SOURCE_DIR})
+    endif()
 elseif(MSVC)
-    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install")
-
+    set(CMAKE_INSTALL_PREFIX "C:\\Program Files\\YourApplication")
     install(TARGETS ${TARGET} RUNTIME DESTINATION "bin")
-    install(FILES "src/vmaware.hpp" DESTINATION "include")
+
+    set(HEADER_INSTALL_PATH "C:\\Program Files (x86)\\YourLibrary\\include")
+    install(FILES "src/vmaware.hpp" DESTINATION "${HEADER_INSTALL_PATH}")
 endif()
