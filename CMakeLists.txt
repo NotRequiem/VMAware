@@ -79,37 +79,49 @@ set(TARGET "vmaware")
 if (MSVC)
     message(STATUS "MSVC generator detected")
 elseif(APPLE)
-    if(CMAKE_BUILD_TYPE MATCHES "Debug")
-        message(STATUS "Build set to debug mode")
-        add_compile_options(-g -O0 -fsanitize=address)
-    elseif(CMAKE_BUILD_TYPE MATCHES "Release")
-        message(STATUS "Build set to release mode")
-        add_compile_options(-g0 -O2 -march=native -mtune=native)
-    endif()
+    message(STATUS "Apple platform detected")
 elseif(LINUX)
-    if(CMAKE_BUILD_TYPE MATCHES "Debug")
-        message(STATUS "Build set to debug mode")
-        add_compile_options(-g -DDEBUG -O0 -fsanitize=address,leak)
-    elseif(CMAKE_BUILD_TYPE MATCHES "Dev_Release")
-        message(STATUS "Build set to development release mode")
-        add_compile_options(-g0 -O2 -mno-avx512f -mno-avx512bw -mno-avx512vl)
-    elseif(CMAKE_BUILD_TYPE MATCHES "Release")
-        message(STATUS "Build set to release mode")
-        add_compile_options(-g0 -O2)
-        if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
-            add_compile_options(-march=native -mtune=native)
-        elseif(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
-            add_compile_options(-mcpu=native)
-        endif()
-    endif()
+    message(STATUS "Linux platform detected")
 else()
     message(STATUS "Build set to release mode")
-    add_compile_options(-O2)
 endif()
 
 # add executable
 add_executable(${TARGET} "src/cli.cpp")
 target_compile_features(${TARGET} PRIVATE cxx_std_20)
+
+# debug/release flags (MULTI-CONFIG SAFE)
+# Apply flags per-config using generator expressions
+
+# Debug (with sanitizers)
+target_compile_options(${TARGET} PRIVATE
+    $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-g;-DDEBUG;-O0;-fsanitize=address,leak>
+)
+
+target_link_options(${TARGET} PRIVATE
+    $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-fsanitize=address,leak>
+)
+
+# Dev_Release
+target_compile_options(${TARGET} PRIVATE
+    $<$<AND:$<CONFIG:Dev_Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-g0;-O2;-mno-avx512f;-mno-avx512bw;-mno-avx512vl>
+)
+
+# Release
+target_compile_options(${TARGET} PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-g0;-O2>
+)
+
+# Architecture-specific optimizations
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    target_compile_options(${TARGET} PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-march=native;-mtune=native>
+    )
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+    target_compile_options(${TARGET} PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-mcpu=native>
+    )
+endif()
 
 # extra flags
 option(DEBUG_OUTPUT "Force __VMAWARE_DEBUG__ define" OFF)
