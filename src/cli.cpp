@@ -1001,7 +1001,7 @@ static void general(
     checker(VM::KVM_INTERCEPTION, "KVM interception");
     checker(VM::HYPERVISOR_HOOK, "EPT/NPT hooking");
     checker(VM::POPF, "popf behavior");
-    checker(VM::EIP_OVERFLOW, "instruction behavior in compatibility mode");
+    checker(VM::EIP_OVERFLOW, "instructions in compat mode");
 
     // ADD NEW TECHNIQUE CHECKER HERE
 

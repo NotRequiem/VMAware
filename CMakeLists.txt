@@ -54,14 +54,13 @@ if (LINUX)
         set(CMAKE_CXX_COMPILER "${GPP_EXECUTABLE}")
         get_filename_component(COMPILER_NAME ${GPP_EXECUTABLE} NAME)
     endif()
+elseif(APPLE)
+    set(COMPILER_NAME "AppleClang")
 elseif(MSVC)
     set(COMPILER_NAME "MSVC")
 endif()
 
 message(STATUS "Compiler: ${COMPILER_NAME}")
-
-# fetch and set build type
-set(available_build_types Debug Release Dev_Release)
 
 # Define preprocessor macros based on the build type
 # Use generator expressions so this works correctly with Visual Studio.
@@ -71,8 +70,6 @@ add_compile_definitions(
 )
 
 # general variables
-set(PROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 set(TARGET "vmaware")
 
 # debug/release CXX flag options
@@ -83,7 +80,7 @@ elseif(APPLE)
 elseif(LINUX)
     message(STATUS "Linux platform detected")
 else()
-    message(STATUS "Build set to release mode")
+    message(STATUS "Unknown platform")
 endif()
 
 # add executable
@@ -93,13 +90,15 @@ target_compile_features(${TARGET} PRIVATE cxx_std_20)
 # debug/release flags (MULTI-CONFIG SAFE)
 # Apply flags per-config using generator expressions
 
-# Debug (with sanitizers)
+# Debug (with sanitizers) — leak sanitizer is Linux-only, not available on macOS
 target_compile_options(${TARGET} PRIVATE
-    $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-g;-DDEBUG;-O0;-fsanitize=address,leak>
+    $<$<AND:$<CONFIG:Debug>,$<PLATFORM_ID:Linux>>:-g;-DDEBUG;-O0;-fsanitize=address,leak>
+    $<$<AND:$<CONFIG:Debug>,$<PLATFORM_ID:Darwin>>:-g;-DDEBUG;-O0;-fsanitize=address>
 )
 
 target_link_options(${TARGET} PRIVATE
-    $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-fsanitize=address,leak>
+    $<$<AND:$<CONFIG:Debug>,$<PLATFORM_ID:Linux>>:-fsanitize=address,leak>
+    $<$<AND:$<CONFIG:Debug>,$<PLATFORM_ID:Darwin>>:-fsanitize=address>
 )
 
 # detect x86
@@ -148,7 +147,6 @@ endif()
 # CTest stuff
 include(CTest)
 if(BUILD_TESTING)
-    enable_testing()
     set(ARGUMENTS "--all")
     if(MSVC)
         add_test(NAME executable COMMAND $<TARGET_FILE:${TARGET}> ${ARGUMENTS})
@@ -160,17 +158,5 @@ endif()
 # install rules
 include(GNUInstallDirs)
 
-if (NOT MSVC)
-    if(CMAKE_BUILD_TYPE MATCHES "Release")
-        install(TARGETS ${TARGET} DESTINATION /usr/bin)
-        install(FILES "src/vmaware.hpp" DESTINATION /usr/include)
-    else()
-        install(TARGETS ${TARGET} DESTINATION ${CMAKE_SOURCE_DIR})
-    endif()
-elseif(MSVC)
-    set(CMAKE_INSTALL_PREFIX "C:\\Program Files\\YourApplication")
-    install(TARGETS ${TARGET} RUNTIME DESTINATION "bin")
-
-    set(HEADER_INSTALL_PATH "C:\\Program Files (x86)\\YourLibrary\\include")
-    install(FILES "src/vmaware.hpp" DESTINATION "${HEADER_INSTALL_PATH}")
-endif()
+install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES "src/vmaware.hpp" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
