@@ -6,7 +6,7 @@ on:
     paths:
       - 'src/**/*.cpp'
       - 'src/**/*.hpp'
-      - '.github/workflows/build.yml'
+      - '.github/workflows/cross-platform-build.yml'
       - '.github/workflows/*.bat'
       - 'CMakeLists.txt'
   pull_request:
@@ -14,7 +14,7 @@ on:
     paths:
       - 'src/**/*.cpp'
       - 'src/**/*.hpp'
-      - '.github/workflows/build.yml'
+      - '.github/workflows/cross-platform-build.yml'
       - '.github/workflows/*.bat'
       - 'CMakeLists.txt'
   workflow_dispatch:
