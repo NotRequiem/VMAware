@@ -10779,6 +10779,16 @@ public:
             return false;
         }
 
+        // WINE has a different MulDiv implementation
+        // behavior
+        // native windows: function returns -1
+        // wine: function returns 0
+        // tested on windows 10, 11, ubuntu 26.04 wine
+        if (MulDiv(1,INT_MIN,INT_MIN) != -1) {
+            vma_debug("WINE: unexpected MulDiv result detected");
+            return core::add(brand_enum::WINE);
+        }
+
         using wine_get_unix_file_name_fn = char* (__stdcall*)(const wchar_t*, char*, DWORD);
         auto wine_get_unix_file = reinterpret_cast<wine_get_unix_file_name_fn>(GetProcAddress(kernel32, "wine_get_unix_file_name"));
         if (wine_get_unix_file != nullptr) {
@@ -10812,6 +10822,46 @@ public:
             }
         }
     #endif
+
+        // WINE does not implement SetErrorMode(SEM_NOALIGNMENTFAULTEXCEPT) correctly 
+        // behavior
+        // native windows: buffer is realigned and execution is resumed
+        // wine: throws a memory alignment fault exception
+        // tested on windows 10, 11, ubuntu 26.04 wine
+        using movaps_fn_t = void (*)(void *);
+        BYTE movaps_stub[] = {
+            0x0F, 0x28, 0x01, // movaps xmm0, [rcx]
+            0xC3              // ret
+        };
+        void* movaps_executable_memory = VirtualAlloc(
+            nullptr,
+            sizeof(movaps_stub),
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_EXECUTE_READWRITE
+        );
+        if (!movaps_executable_memory) {
+            vma_debug("WINE: failed to allocate rwx region for kernel movaps realignment check");
+            return false;
+        }
+        memcpy(movaps_executable_memory, movaps_stub, sizeof(movaps_stub));
+        movaps_fn_t movaps_fn = (movaps_fn_t)movaps_executable_memory;
+        alignas(16) BYTE buffer[32]{};
+        void *misaligned = buffer + 1;
+
+        UINT old_error_mode = SetErrorMode(SEM_NOALIGNMENTFAULTEXCEPT);
+        bool exception_ran = false;
+        __try {
+            movaps_fn(misaligned);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            vma_debug("WINE: misaligned buffer passed to movaps was not realigned");
+            exception_ran = true;
+        }
+        // restore previous error mode
+        SetErrorMode(old_error_mode);
+        if (exception_ran) {
+            return core::add(brand_enum::WINE);
+        }
 
         return false;
     }
