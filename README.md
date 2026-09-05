@@ -332,7 +332,8 @@ For email inquiries: `vmaware.support@gmail.com`
 - [Everdox](https://github.com/everdox)
 - [snackapps](https://github.com/snackapps)
 - [Bandwidth](https://github.com/bandw1dth)
- 
+- [lain804](https://github.com/lain804)
+  
 <br>
 
 ## Legal 📜
