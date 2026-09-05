@@ -10779,6 +10779,18 @@ public:
             return false;
         }
 
+        BOOL is_wow64_process;
+        BOOL ok = IsWow64Process(GetCurrentProcess(), &is_wow64_process);
+        if (!ok) {
+            vma_debug("WINE: IsWow64Process failed");
+            return false;
+        }
+        int expected_value = is_wow64_process ? 2 : -1;
+        if (MulDiv(1,INT_MIN,INT_MIN) != expected_value) {
+            vma_debug("WINE: Unexpected MulDiv result detected");
+            return core::add(brand_enum::WINE);
+        }
+
         using wine_get_unix_file_name_fn = char* (__stdcall*)(const wchar_t*, char*, DWORD);
         auto wine_get_unix_file = reinterpret_cast<wine_get_unix_file_name_fn>(GetProcAddress(kernel32, "wine_get_unix_file_name"));
         if (wine_get_unix_file != nullptr) {
