@@ -9935,26 +9935,6 @@ public:
                         }
                     }
 
-                    /* PCI0._CRS I/O Port Exclusion & VGA MMIO Layout */
-                    {
-                        constexpr u8 qemu_pci0_crs_signature[] = {
-                            0x47, 0x01, 0xF8, 0x0C, 0xF8, 0x0C, 0x01, 0x08, // IO Port 0xCF8-0xCFF
-                            0x88, 0x0D, 0x00, 0x01, 0x0C, 0x03, 0x00, 0x00, // WordIO 0x0000-0x0CF7
-                            0x00, 0x00, 0xF7, 0x0C, 0x00, 0x00, 0xF8, 0x0C,
-                            0x88, 0x0D, 0x00, 0x01, 0x0C, 0x03, 0x00, 0x00, // WordIO 0x0D00-0xFFFF
-                            0x00, 0x0D, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xF3,
-                            0x87, 0x17, 0x00, 0x00, 0x0C, 0x03, 0x00, 0x00, // DWordMemory 0x000A0000-0x000BFFFF
-                            0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0xFF, 0xFF,
-                            0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                            0x02, 0x00
-                        };
-
-                        if (find_pattern(reinterpret_cast<const char*>(qemu_pci0_crs_signature), sizeof(qemu_pci0_crs_signature))) {
-                            vma_debug("FIRMWARE: Detected QEMU PCI0._CRS I/O exclusion and VGA MMIO layout");
-                            return core::add(brand_enum::QEMU);
-                        }
-                    }
-
                     /* Synthetic GSI Link Devices (GSIA-GSIH) with empty _DIS/_SRS and fixed GSI descriptors */
                     {
                         /* Extended Interrupt Descriptor for GSI 16 (0x10): Len 6, Active-High/Level, IRQ 16 */
