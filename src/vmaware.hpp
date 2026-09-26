@@ -6986,21 +6986,28 @@ public:
         const char* brand = cpu::get_brand();
 
         if (intel) {
-            /* Technique 1: not a valid brand */
-            if (brand && strcmp(brand, "              Intel(R) Pentium(R) 4 CPU        ") == 0) {
+            /* Bochs hardcodes 8 trailing spaces with no CPU clock frequency */
+            if (brand && (strcmp(brand, "              Intel(R) Pentium(R) 4 CPU        ") == 0 ||
+                strcmp(brand, "Intel(R) Pentium(R) 4 CPU") == 0)) {
                 vma_debug("BOCHS_CPU: technique 1 found");
                 return core::add(brand_enum::BOCHS);
             }
         }
         else if (amd) {
-            /* Technique 2: "processor" should have a capital P */
-            if (brand && strcmp(brand, "AMD Athlon(tm) processor") == 0) {
+            /* "processor" should have a capital P */
+            if (brand && (strcmp(brand, "AMD Athlon(tm) processor") == 0 ||
+                strstr(brand, "AMD Athlon(tm) processor") != nullptr)) {
                 vma_debug("BOCHS_CPU: technique 2 found");
                 return core::add(brand_enum::BOCHS);
             }
 
-            /* Technique 3: Check for absence of AMD easter egg for K7 and K8 CPUs */
+            /* Check for absence of AMD easter egg ("IT'S HAMMER TIME") */
             if (!cpu::is_leaf_supported(cpu::leaf::features)) {
+                return false;
+            }
+
+            /* To not false flag Microsoft's x64-on-ARM emulator */
+            if (brand && (strstr(brand, "Virtual CPU") != nullptr || strstr(brand, "AMD") == nullptr)) {
                 return false;
             }
 
@@ -7008,33 +7015,21 @@ public:
             u32 eax = 0;
             cpu::cpuid(eax, unused, unused, unused, cpu::leaf::features);
 
-            auto is_k7 = [](const u32 eax) noexcept -> bool {
-                if ((eax & 0x0FF00F00) != 0x00000600) {
-                    return false;
-                }
-
-                const u32 model = (eax >> 4) & 0xF;
-
-                return (model - 1) < 4;
-            };
-
             auto is_k8 = [](const u32 eax) noexcept -> bool {
-                if (((eax >> 8) & 0xF) != 0xF) {
-                    return false;
-                }
-
+                const u32 base_family = (eax >> 8) & 0xF;
                 const u32 extended_family = (eax >> 20) & 0xFF;
 
-                return extended_family <= 1;
+                return (base_family == 0xF && extended_family == 0);
             };
 
-            if (!(is_k7(eax) || is_k8(eax))) {
+            if (!is_k8(eax)) {
                 return false;
             }
 
             u32 ecx_bochs = 0;
             cpu::cpuid(unused, unused, ecx_bochs, unused, cpu::leaf::amd_easter_egg);
 
+            /* Real K8 returns 0x2052454D on ECX ("MER "). Bochs returns 0 */
             if (ecx_bochs == 0) {
                 vma_debug("BOCHS_CPU: technique 3 found");
                 return core::add(brand_enum::BOCHS);
