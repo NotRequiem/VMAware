@@ -332,7 +332,7 @@ jobs:
           path: build\Release\vmaware_${{ github.run_number }}_${{ env.SHORT_SHA }}.exe
 
   windows-arm-compilation:
-    runs-on: windows-11-arm
+    runs-on: windows-2022
     timeout-minutes: 10
 
     strategy:
@@ -363,7 +363,6 @@ jobs:
             debug_output: OFF
             artifact: vmaware-arm32_release.exe
 
-          # Windows 11 ARM64EC (Emulation Compatible)
           - config: arm64ec-debug
             platform: ARM64EC
             build_config: Debug
