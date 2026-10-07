@@ -5840,7 +5840,7 @@ public:
 
                 FreeLibrary(tbs);
 
-                /* true here is intentional, on any error when obtaining TPM data */
+                /* True here is intentional, on any error when obtaining TPM data */
                 if (hr != 0 || !log_buffer) {
                     delete[] log_buffer;
                     return true;
