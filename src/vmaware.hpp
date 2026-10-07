@@ -5750,20 +5750,20 @@ public:
             };
 
             auto is_log_present = []() -> bool {
-                #pragma pack(push, 1)
-                    struct tcg_pcr_event_header {
-                        u8 pad[28];
-                        u32 event_data_size;
-                        u8 event_data[1];
-                    };
-                    struct tcg_efi_spec_id_event_struct_header {
-                        u8 pad[24];
-                        u32 number_of_algorithms;
-                    };
-                    struct tbs_context_params {
-                        u32 version;
-                    };
-                #pragma pack(pop)
+            #pragma pack(push, 1)
+                struct tcg_pcr_event_header {
+                    u8 pad[28];
+                    u32 event_data_size;
+                    u8 event_data[1];
+                };
+                struct tcg_efi_spec_id_event_struct_header {
+                    u8 pad[24];
+                    u32 number_of_algorithms;
+                };
+                struct tbs_context_params {
+                    u32 version;
+                };
+            #pragma pack(pop)
 
                 using pfn_tbsi_get_tcg_log_ex = int(__stdcall*)(u32, u8*, u32*);
                 using pfn_tbsi_context_create = int(__stdcall*)(void*, void**);
@@ -5772,7 +5772,7 @@ public:
 
                 const HMODULE tbs = LoadLibraryExW(L"tbs.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
                 if (!tbs) {
-                    return true; /* If not Windows 10, return true (legit) to not false flag */
+                    return true;
                 }
 
                 constexpr const char* function_names[] = {
@@ -5791,7 +5791,7 @@ public:
 
                 if (!get_tcg_log_ex && !(context_create && get_tcg_log && context_close)) {
                     FreeLibrary(tbs);
-                    return true; /* If not Windows 10, return true (legit) to not false flag */
+                    return true;
                 }
 
                 u32 log_size = 0;
@@ -5801,8 +5801,17 @@ public:
                 if (get_tcg_log_ex) {
                     hr = get_tcg_log_ex(0, nullptr, &log_size);
                     if ((hr == 0 || hr == static_cast<decltype(hr)>(0x80284005)) && log_size > 0) {
-                        log_buffer = new u8[log_size];
-                        hr = get_tcg_log_ex(0, log_buffer, &log_size);
+                        log_buffer = new (std::nothrow) u8[log_size];
+                        if (log_buffer) {
+                            hr = get_tcg_log_ex(0, log_buffer, &log_size);
+                            if (hr == static_cast<decltype(hr)>(0x80284005) && log_size > 0) {
+                                delete[] log_buffer;
+                                log_buffer = new (std::nothrow) u8[log_size];
+                                if (log_buffer) {
+                                    hr = get_tcg_log_ex(0, log_buffer, &log_size);
+                                }
+                            }
+                        }
                     }
                 }
                 else if (context_create && get_tcg_log && context_close) {
@@ -5810,11 +5819,20 @@ public:
                     tbs_context_params params{};
                     params.version = 1;
                     hr = context_create(&params, &context);
-                    if (hr == 0) {
+                    if (hr == 0 && context) {
                         hr = get_tcg_log(context, nullptr, &log_size);
                         if ((hr == 0 || hr == static_cast<decltype(hr)>(0x80284005)) && log_size > 0) {
-                            log_buffer = new u8[log_size];
-                            hr = get_tcg_log(context, log_buffer, &log_size);
+                            log_buffer = new (std::nothrow) u8[log_size];
+                            if (log_buffer) {
+                                hr = get_tcg_log(context, log_buffer, &log_size);
+                                if (hr == static_cast<decltype(hr)>(0x80284005) && log_size > 0) {
+                                    delete[] log_buffer;
+                                    log_buffer = new (std::nothrow) u8[log_size];
+                                    if (log_buffer) {
+                                        hr = get_tcg_log(context, log_buffer, &log_size);
+                                    }
+                                }
+                            }
                         }
                         context_close(context);
                     }
@@ -5822,18 +5840,21 @@ public:
 
                 FreeLibrary(tbs);
 
+                /* true here is intentional, on any error when obtaining TPM data */
                 if (hr != 0 || !log_buffer) {
                     delete[] log_buffer;
-                    return true; /* No functional TPM? */
+                    return true;
                 }
 
                 bool found_hyperv = false;
                 bool parse_error = false;
+
                 do {
                     if (log_size < 32) {
                         parse_error = true;
                         break;
                     }
+
                     const auto* const first_event = reinterpret_cast<const tcg_pcr_event_header*>(log_buffer);
 
                     u32 event_data_size = 0;
@@ -5843,6 +5864,7 @@ public:
                         parse_error = true;
                         break;
                     }
+
                     const size_t first_event_size = static_cast<size_t>(32) + event_data_size;
                     const bool crypto_agile = (event_data_size >= 16 && std::memcmp(first_event->event_data, "Spec ID Event03", 15) == 0);
 
@@ -5851,14 +5873,17 @@ public:
                         u16 digest_size;
                     };
 
-                    alg_size_pair alg_sizes[16] = {
+                    alg_size_pair alg_sizes[32] = {
                         {0x0004, 20}, /* SHA1 */
                         {0x000B, 32}, /* SHA256 */
                         {0x000C, 48}, /* SHA384 */
                         {0x000D, 64}, /* SHA512 */
-                        {0x0012, 32}  /* SM3 */
+                        {0x0012, 32}, /* SM3 */
+                        {0x0013, 32}, /* SHA3-256 */
+                        {0x0014, 48}, /* SHA3-384 */
+                        {0x0015, 64}  /* SHA3-512 */
                     };
-                    size_t alg_count = 5;
+                    size_t alg_count = 8;
 
                     if (crypto_agile) {
                         if (event_data_size >= sizeof(tcg_efi_spec_id_event_struct_header)) {
@@ -5883,7 +5908,7 @@ public:
                                             break;
                                         }
                                     }
-                                    if (!updated && alg_count < 16) {
+                                    if (!updated && alg_count < 32) {
                                         alg_sizes[alg_count++] = { alg_id, digest_size };
                                     }
                                 }
@@ -5901,38 +5926,96 @@ public:
 
                     size_t offset = first_event_size;
 
-                    constexpr const wchar_t* hyperv_targets[] = {
-                        L"hvix64.exe", L"hvax64.exe", L"hvloader.dll", L"securekernel.exe",
-                        L"winresume.efi", L"hiberresume.exe", L"hiberrsm.exe"
+                    constexpr const wchar_t* wide_targets[] = {
+                        L"hvix64.exe",      /* Intel x64 Hypervisor */
+                        L"hvax64.exe",      /* AMD x64 Hypervisor */
+                        L"hvaa64.exe",      /* ARM64 Hypervisor */
+                        L"hvam64.exe",      /* ARM64 Hypervisor (legacy/alt) */
+                        L"hvloader.dll",    /* Hyper-V OS Loader Library */
+                        L"hvloader.efi",    /* Hyper-V UEFI Loader */
+                        L"securekernel.exe",/* VBS Secure Kernel */
+                        L"skci.dll",        /* Secure Kernel Code Integrity */
+                        L"tcblaunch.exe",   /* System Guard Secure Launch */
+                        L"vmbus.sys",       /* Root Partition Hyper-V Bus Driver */
+                        L"winresume.efi",   /* Windows Resume Application (PCR 11/13) */
+                        L"hiberresume.exe", /* Hibernation Resume */
+                        L"hiberrsm.exe"     /* Hibernation Resume */
                     };
 
+                    constexpr const char* narrow_targets[] = {
+                        "hvix64.exe",
+                        "hvax64.exe",
+                        "hvaa64.exe",
+                        "hvam64.exe",
+                        "hvloader.dll",
+                        "hvloader.efi",
+                        "securekernel.exe",
+                        "skci.dll",
+                        "tcblaunch.exe",
+                        "vmbus.sys",
+                        "winresume.efi",
+                        "hiberresume.exe",
+                        "hiberrsm.exe"
+                    };
+
+                    constexpr size_t num_targets = sizeof(wide_targets) / sizeof(wide_targets[0]);
+
                     const auto scan_targets = [&](const u32 pcr, const u32 event_size, const u8* const event_data) -> bool {
-                        if (pcr == 11 || pcr == 13) {
-                            for (const auto& target : hyperv_targets) {
-                                size_t target_len = 0;
-                                while (target[target_len] != L'\0') {
-                                    target_len++;
-                                }
-                                const size_t len = target_len * 2;
+                        if (pcr != 11 && pcr != 13) {
+                            return false;
+                        }
 
-                                if (event_size < len) {
-                                    continue;
-                                }
+                        for (size_t t = 0; t < num_targets; ++t) {
+                            const wchar_t* const wtarget = wide_targets[t];
+                            size_t target_len = 0;
+                            while (wtarget[target_len] != L'\0') {
+                                target_len++;
+                            }
 
-                                for (size_t i = 0; i <= event_size - len; i += 1) {
+                            /* UTF-16LE encoding */
+                            const size_t wide_len = target_len * 2;
+                            if (event_size >= wide_len) {
+                                for (size_t i = 0; i <= event_size - wide_len; ++i) {
                                     bool match = true;
                                     for (size_t j = 0; j < target_len; ++j) {
-                                        const unsigned char low_byte = static_cast<unsigned char>(event_data[i + (j * 2)]);
-                                        const unsigned char high_byte = static_cast<unsigned char>(event_data[i + (j * 2) + 1]);
+                                        const unsigned char low_byte = event_data[i + (j * 2)];
+                                        const unsigned char high_byte = event_data[i + (j * 2) + 1];
 
                                         wchar_t log_char = static_cast<wchar_t>(low_byte | (high_byte << 8));
-                                        wchar_t target_char = target[j];
+                                        wchar_t target_char = wtarget[j];
 
                                         if (log_char >= L'A' && log_char <= L'Z') {
                                             log_char = log_char - L'A' + L'a';
                                         }
                                         if (target_char >= L'A' && target_char <= L'Z') {
                                             target_char = target_char - L'A' + L'a';
+                                        }
+
+                                        if (log_char != target_char) {
+                                            match = false;
+                                            break;
+                                        }
+                                    }
+                                    if (match) {
+                                        return true;
+                                    }
+                                }
+                            }
+
+                            /* narrow ASCII encoding */
+                            const char* const ntarget = narrow_targets[t];
+                            if (event_size >= target_len) {
+                                for (size_t i = 0; i <= event_size - target_len; ++i) {
+                                    bool match = true;
+                                    for (size_t j = 0; j < target_len; ++j) {
+                                        char log_char = static_cast<char>(event_data[i + j]);
+                                        char target_char = ntarget[j];
+
+                                        if (log_char >= 'A' && log_char <= 'Z') {
+                                            log_char = log_char - 'A' + 'a';
+                                        }
+                                        if (target_char >= 'A' && target_char <= 'Z') {
+                                            target_char = target_char - 'A' + 'a';
                                         }
 
                                         if (log_char != target_char) {
@@ -6044,6 +6127,7 @@ public:
                     return true;
                 }
 
+                /* Returns true if Hyper-V logs were found, false if parsed cleanly with none found */
                 return found_hyperv;
             };
 
