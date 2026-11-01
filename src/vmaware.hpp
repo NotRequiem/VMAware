@@ -947,7 +947,6 @@ public:
         DMI_SCAN,
         PODMAN_FILE,
         WSL_PROC,
-        FILE_ACCESS_HISTORY,
         MAC,
         CONTAINER_PID,
         BLUESTACKS_FOLDERS,
@@ -8542,13 +8541,10 @@ public:
             return false;
         }
 
-        /*
-         * Check hypervisor banner lines to avoid false positives on bare-metal
-         * hosts where host modules (like kvm_intel / kvm_amd) are loaded
-         */
         if (contains_ci(output, "Hypervisor detected: KVM") ||
             contains_ci(output, "Booting paravirtualized kernel on KVM") ||
-            (contains_ci(output, "hypervisor") && contains_ci(output, "KVM"))) {
+            contains_ci(output, "kvm-clock") ||
+            contains_ci(output, "kvm-guest")) {
             return core::add(brand_enum::KVM);
         }
 
@@ -8560,7 +8556,13 @@ public:
             return core::add(brand_enum::VBOX);
         }
 
-        if (contains_ci(output, "Hypervisor detected") || contains_ci(output, "paravirtualized kernel")) {
+        const bool is_pv_guest = contains_ci(output, "paravirtualized kernel") &&
+            !contains_ci(output, "bare hardware");
+
+        const bool is_hypervisor_detected = contains_ci(output, "Hypervisor detected:") &&
+            !contains_ci(output, "No hypervisor detected");
+
+        if (is_hypervisor_detected || is_pv_guest) {
             return true;
         }
 
@@ -9131,34 +9133,6 @@ public:
         }
 
         return false;
-    }
-
-
-    /**
-     * @brief Check if the number of accessed files are too low for a human-managed environment
-     * @category Linux
-     * @author idea from https://unprotect.it/technique/xbel-recently-opened-files-check/
-     * @implements VM::FILE_ACCESS_HISTORY
-     */
-    [[nodiscard]] static bool file_access_history() {
-        const std::string xbel_file = util::read_file("~/.local/share/recently-used.xbel");
-        
-        if (xbel_file.empty()) {
-            vma_debug("FILE_ACCESS_HISTORY: file content is empty");
-            return false;
-        }
-
-        const std::string key = "href";
-
-        u32 count = 0;
-        std::size_t pos = 0;
-
-        while ((pos = xbel_file.find(key, pos)) != std::string::npos) {
-            count++;
-            pos += key.length();
-        }
-
-        return (count <= 10); 
     }
 
 
@@ -18227,7 +18201,6 @@ public:
             case AMD_SEV_MSR: return "AMD_SEV_MSR";
             case VIRTUAL_REGISTRY: return "VIRTUAL_REGISTRY";
             case FIRMWARE: return "FIRMWARE";
-            case FILE_ACCESS_HISTORY: return "FILE_ACCESS_HISTORY";
             case CONTAINER_PID: return "CONTAINER_PID";
             case DEVICES: return "DEVICES";
             case ACPI_SIGNATURE: return "ACPI_SIGNATURE";
@@ -18736,7 +18709,6 @@ std::array<VM::core::technique, VM::enum_size + 1> VM::core::technique_table = [
             {VM::DMI_SCAN, {50, VM::dmi_scan}},
             {VM::PODMAN_FILE, {5, VM::podman_file}},
             {VM::WSL_PROC, {30, VM::wsl_proc_subdir}},
-            {VM::FILE_ACCESS_HISTORY, {15, VM::file_access_history}},
             {VM::MAC, {20, VM::mac_address_check}},
             {VM::CONTAINER_PID, {75, VM::container_proc_id}},
             {VM::BLUESTACKS_FOLDERS, {5, VM::bluestacks}},

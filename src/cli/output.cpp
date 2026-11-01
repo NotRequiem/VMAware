@@ -591,7 +591,6 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
     checker(VM::AMD_SEV_MSR, "AMD-SEV MSR");
     checker(VM::VIRTUAL_REGISTRY, "registry emulation");
     checker(VM::FIRMWARE, "firmware");
-    checker(VM::FILE_ACCESS_HISTORY, "low file access count");
     checker(VM::CONTAINER_PID, "container PID");
     checker(VM::DEVICES, "PCI vendor/device ID");
     checker(VM::ACPI_SIGNATURE, "ACPI device signatures");
