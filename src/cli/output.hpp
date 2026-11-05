@@ -5,7 +5,10 @@
 #include <string>
 
 bool is_admin() noexcept;
-const char* color(u8 score, bool is_hardened);
+const char* color(const u8 score);
+const char* get_version();
+const char* get_date();
+void console_pause();
 bool is_vm_brand_multiple(const std::string& vm_brand) noexcept;
 const char* get_vm_description(const std::string& vm_brand);
 

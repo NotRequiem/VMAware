@@ -55,9 +55,6 @@
     struct _CrtMemState {};
 #endif
 
-constexpr const char* ver = "2.8.2";
-constexpr const char* date = "September 2026";
-
 [[noreturn]] static void help() {
     std::cout <<
         R"(Usage:
@@ -91,23 +88,26 @@ constexpr const char* date = "September 2026";
          --rich             output the rich TUI alternative of the output (Windows specific)
         )";
 
-    std::exit(0);
+    console_pause();
+
 }
 
 [[noreturn]] static void version() {
-    std::cout << "vmaware " << "v" << ver << " (" << date << ")\n\n" <<
+    std::cout << "vmaware " << "v" << get_version() << " (" << get_date() << ")\n\n" <<
         "Derived project of VMAware library at https://github.com/NotRequiem/VMAware\n"
         "License MIT:<https://opensource.org/license/mit>.\n" <<
         "This is free software: you are free to change and redistribute it.\n" <<
         "There is NO WARRANTY, to the extent permitted by law.\n" <<
         "Developed and maintained by Requiem,\n" <<
         "For any inquiries, contact us on Discord at shenzken, or email us at vmaware.support@gmail.com\n";
+
+    console_pause();
     std::exit(0);
 }
 
 [[noreturn]] static void brand_list() {
     std::cout << 
-        R"(VirtualBox
+     R"(VirtualBox
         VMware
         VMware Express
         VMware ESX
@@ -178,7 +178,9 @@ constexpr const char* date = "September 2026";
         Insignia RealPC
         Connectix Virtual PC
         Containerd
-        )";
+     )";
+
+    console_pause();
     std::exit(0);
 }
 

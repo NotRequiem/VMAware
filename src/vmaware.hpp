@@ -1111,6 +1111,15 @@ public:
     using brand_list_t = std::vector<brand_element_t>;
     using brand_array_t = std::array<brand_element_t, MAX_BRANDS>;
 
+    static constexpr u32 version_major = 2;
+    static constexpr u32 version_minor = 8;
+    static constexpr u32 version_patch = 2;
+
+    /* Packed integer for comparisons (Format: MMmmpp -> 2.8.2 becomes 20802) */
+    static constexpr u32 version_code = (version_major * 10000) + (version_minor * 100) + (version_patch);
+    static constexpr const char* version = "2.8.2";
+    static constexpr const char* date = "November 2026";
+
     /* Constructor stuff */
     VM() = delete;
     VM(const VM&) = delete;
@@ -1118,7 +1127,6 @@ public:
 
     /* Compile-time checks */
     static_assert(std::is_integral<brand_score_t>::value, "brand_score_t must map to an integral type.");
-
     static_assert(enum_size == MULTIPLE, "enum_size must match the terminal element of the enum_flags.");
     static_assert(MAX_BRANDS == static_cast<size_t>(brand_enum::NULL_BRAND) + 1, "MAX_BRANDS must account for all elements including NULL_BRAND.");
     static_assert(enum_begin == 0, "enum_begin must start at 0.");
@@ -1134,6 +1142,12 @@ public:
     static_assert(WINDOWS_START < WINDOWS_END, "WINDOWS range bounds are logically inverted.");
     static_assert(LINUX_START < LINUX_END, "LINUX range bounds are logically inverted.");
     static_assert(MACOS_START < MACOS_END, "MACOS range bounds are logically inverted.");
+
+    static_assert(version_minor < 100, "version_minor must be < 100 to fit in version_code");
+    static_assert(version_patch < 100, "version_patch must be < 100 to fit in version_code");
+    static_assert(version != nullptr && version[0] != '\0', "version string cannot be empty");
+    static_assert(version[0] >= '0' && version[0] <= '9', "version string must start with a digit (use '2.8.2', do not include 'v')");
+    static_assert(version_major >= 10 || version[0] == static_cast<char>('0' + version_major), "Mismatch: the first character of version string does not match version_major");
 
     /* Specifically for util::hyper_x() and memo::hyperv */
     enum hyperx_state : u8 {

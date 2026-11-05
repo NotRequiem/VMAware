@@ -15,7 +15,7 @@
     #include <unistd.h>
 #endif
 
-static const char* color(const u8 score) {
+const char* color(const u8 score) {
     if (arg_bitset.test(NO_ANSI)) {
         return "";
     }
@@ -40,7 +40,15 @@ static const char* color(const u8 score) {
     return "";
 }
 
-static void console_pause() {
+const char* get_version() {
+    return VM::version;
+}
+
+const char* get_date() {
+    return VM::date;
+}
+
+void console_pause() {
     std::cout << "Press Enter to exit...";
     std::cout.flush();
 
