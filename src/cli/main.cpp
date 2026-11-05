@@ -86,10 +86,10 @@
          --detected-only    only display the techniques that were detected
          --json             output a json-formatted file of the results
          --rich             output the rich TUI alternative of the output (Windows specific)
-        )";
+       )";
 
     console_pause();
-
+    std::exit(EXIT_SUCCESS);
 }
 
 [[noreturn]] static void version() {
@@ -102,7 +102,7 @@
         "For any inquiries, contact us on Discord at shenzken, or email us at vmaware.support@gmail.com\n";
 
     console_pause();
-    std::exit(0);
+    std::exit(EXIT_SUCCESS);
 }
 
 [[noreturn]] static void brand_list() {
@@ -181,7 +181,7 @@
      )";
 
     console_pause();
-    std::exit(0);
+    std::exit(EXIT_SUCCESS);
 }
 
 #if (CLI_WINDOWS && defined(VMAWARE_DEBUG) && defined(_DEBUG) && !CLI_ARM)
