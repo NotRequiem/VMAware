@@ -285,8 +285,8 @@ For email inquiries: `vmaware.support@gmail.com`
 
 <br>
 
+- [kernelwernel](https://github.com/kernelwernel) (Creator and developer of the project)
 - [Requiem](https://github.com/NotRequiem) (Main developer)
-- [kernelwernel](https://github.com/kernelwernel) (Former creator and developer of the project)
 - [Check Point Research](https://research.checkpoint.com/)
 - [Unprotect Project](https://unprotect.it/)
 - [Al-Khaser](https://github.com/LordNoteworthy/al-khaser)
