@@ -21,7 +21,6 @@ The library is:
 - Able to beat VM hardeners
 - Very flexible, with fine-grained control over which techniques get executed
 - Capable of detecting various VM and semi-VM technologies, including hypervisors, emulators, containers, sandboxes, and more
-- Memoized, meaning past results are cached and retrieved if ran again for performance benefits 
 - Available with C++11 and above
 - Backed by an ecosystem of ports to other languages such as Rust, JavaScript, and Ruby
 - Header-only

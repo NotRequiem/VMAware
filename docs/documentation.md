@@ -416,9 +416,29 @@ int main() {
 }
 ```
 
+The caller can use the `VM::vmaware` struct to capture a single snapshot that owns the data too, acting as memoization.
+
+```cpp
+#include "vmaware.hpp"
+#include <iostream>
+
+int main() {
+    // Runs all detections once; caller owns the immutable result
+    VM::vmaware vm;
+
+    if (vm.is_vm) {
+        std::cout << "VM Detected!\n";
+        std::cout << "Brand: " << vm.brand << "\n";
+        std::cout << "Type:  " << vm.type << "\n";
+        std::cout << "Certainty: " << (int)vm.percentage << "%\n";
+    } else {
+        std::cout << "Running on bare metal\n";
+    }
+}
+```
+
 > [!NOTE]
 > The flag system is compatible for the struct constructor.
-
 
 <br>
 

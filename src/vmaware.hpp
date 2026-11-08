@@ -3467,132 +3467,6 @@ public:
     }
 
     struct memo {
-        struct data_t {
-            bool result;
-            u8 points;
-            bool cached;
-            brand_enum brand_name;
-        };
-        struct cache_entry {
-            bool result;
-            u8 points;
-            bool has_value;
-            brand_enum brand_name;
-        };
-
-        static std::array<cache_entry, enum_size + 1> cache_table;
-
-        static void cache_store(u16 flag, bool result, u8 points, const brand_enum brand = brand_enum::NULL_BRAND) noexcept {
-            if (flag <= enum_size) {
-                VMAWARE_ASSUME(flag <= enum_size);
-                cache_table[flag] = { result, points, true, brand };
-            }
-        }
-
-        static bool is_cached(u16 flag) noexcept {
-            return VMAWARE_LIKELY(flag <= enum_size) && cache_table[flag].has_value;
-        }
-
-        static data_t cache_fetch(u16 flag) noexcept {
-            if (VMAWARE_UNLIKELY(flag > enum_size)) {
-                return { false, 0, false, brand_enum::NULL_BRAND };
-            }
-
-            if (VMAWARE_LIKELY(cache_table[flag].has_value)) {
-                const auto& entry = cache_table[flag];
-                return { entry.result, entry.points, true, entry.brand_name };
-            }
-
-            return { false, 0, false, brand_enum::NULL_BRAND };
-        }
-
-        struct single_brand {
-            static brand_enum brand_cache;
-            static flagset cached_flags;
-            static bool cached;
-
-            static void store(const brand_enum s, const flagset& flags) noexcept {
-                brand_cache = s;
-                cached_flags = flags;
-                cached = true;
-            }
-
-            static bool is_cached(const flagset& flags) noexcept {
-                return cached && (cached_flags == flags);
-            }
-
-            static brand_enum fetch() noexcept {
-                return brand_cache;
-            }
-        };
-
-        struct multi_brand {
-            static std::string brand_cache;
-            static flagset cached_flags;
-            static bool cached;
-
-            static void store(const std::string& s, const flagset& flags) noexcept {
-                try {
-                    brand_cache = s;
-                    cached_flags = flags;
-                    cached = true;
-                }
-                catch (...) {}
-            }
-
-            static bool is_cached(const flagset& flags) noexcept {
-                return cached && (cached_flags == flags);
-            }
-
-            static const std::string& fetch() noexcept {
-                return brand_cache;
-            }
-        };
-
-        struct brand_list {
-            static brand_list_t cache;
-            static flagset cached_flags;
-            static bool cached;
-
-            static void store(const brand_list_t& list, const flagset& flags) noexcept {
-                try {
-                    cache = list;
-                    cached_flags = flags;
-                    cached = true;
-                }
-                catch (...) {}
-            }
-
-            static bool is_cached(const flagset& flags) noexcept {
-                return cached && (cached_flags == flags);
-            }
-
-            static const brand_list_t& fetch() noexcept {
-                return cache;
-            }
-        };
-
-        /* Helper specifically for conclusion strings */
-        struct conclusion {
-            static char cache[512];
-            static flagset cached_flags;
-            static bool cached;
-
-            static void store(const char* s, const flagset& flags) noexcept {
-                str_copy(cache, s);
-                cached_flags = flags;
-                cached = true;
-            }
-
-            static bool is_cached(const flagset& flags) noexcept {
-                return cached && (cached_flags == flags);
-            }
-
-            static const char* fetch() noexcept {
-                return cache;
-            }
-        };
-
         struct cpu_brand {
             static char brand_cache[128];
             static bool cached;
@@ -6663,10 +6537,6 @@ public:
         static constexpr const char* CONTAINERD = "Containerd";
 
         static brand_list_t brand_list(const flagset& flags) {
-            if (memo::brand_list::is_cached(flags)) {
-                return memo::brand_list::fetch();
-            }
-
             /* Run all the techniques */
             const u16 score = core::run_all(flags);
 
@@ -6692,7 +6562,6 @@ public:
             /* If all brands have a point of 0, return "Unknown" */
             if (active_brands.empty()) {
                 active_brands.emplace_back(brand_enum::NULL_BRAND, 0);
-                memo::brand_list::store(active_brands, flags);
                 return active_brands;
             }
 
@@ -6705,7 +6574,6 @@ public:
                     remove(brand_enum::HYPERV_ROOT);
                 }
 
-                memo::brand_list::store(active_brands, flags);
                 return active_brands;
             }
 
@@ -6824,7 +6692,6 @@ public:
                 } );
             }
 
-            memo::brand_list::store(active_brands, flags);
             return active_brands;
         }
 
@@ -6920,14 +6787,9 @@ public:
         }
 
         static std::string brand_multiple(const flagset& flags = core::generate_default()) {
-            if (memo::multi_brand::is_cached(flags)) {
-                return memo::multi_brand::fetch();
-            }
-
             const brand_list_t& list = brands::brand_list(flags);
             const std::string& buffer = brand_multiple(list);
 
-            memo::multi_brand::store(buffer, flags);
             return buffer;
         }
 
@@ -6937,16 +6799,8 @@ public:
         }
 
         static brand_enum brand_single(const flagset& flags = core::generate_default()) {
-            if (memo::single_brand::is_cached(flags)) {
-                return memo::single_brand::fetch();
-            }
-
-            const brand_list_t& list = brands::brand_list(flags);
-            const enum brand_enum brand = brand_single(list);
-
-            memo::single_brand::store(brand, flags);
-
-            return brand;
+            const brand_list_t list = brands::brand_list(flags);
+            return brand_single(list);
         }
     };
 
@@ -7687,533 +7541,540 @@ public:
      */
     [[nodiscard]] static vmaware_technique timer() VMAWARE_SERIALIZE {
     #if (VMAWARE_X86 && VMAWARE_WINDOWS)
-        if (util::is_x86_process_on_arm()) {
-            vma_debug("TIMER: Running inside a binary translation layer");
-            return false;
-        }
-
-        const GROUP_AFFINITY trigger_affinity = timer::scheduler::get_mask(true);
-        static GROUP_AFFINITY counter_affinity{};
-        counter_affinity = timer::scheduler::get_mask(false);
-
-        if (!trigger_affinity.Mask || !counter_affinity.Mask) {
-            return false;
-        }
-
-        const HMODULE ntdll = memory::get_module(true);
-        if (!ntdll) {
-            return false;
-        }
-
-        constexpr const char* function_names[] = {
-            "ZwRaiseException"
-        };
-        void* functions[ARRAYSIZE(function_names)] = {};
-        memory::get_function(ntdll, function_names, functions, ARRAYSIZE(function_names));
-
-        using zw_raise_exception_fn = NTSTATUS(__stdcall*)(PEXCEPTION_RECORD, PCONTEXT, BOOLEAN);
-        zw_raise_exception_fn zw_raise_exception = reinterpret_cast<zw_raise_exception_fn>(functions[0]);
-        if (!zw_raise_exception) {
-            return false;
-        }
-
-        /* Calculation of minimum threshold for instrution latency */
-        constexpr double threshold = 2.75;
-        bool check_nested = false;
-        if (util::hyper_x() == HYPERV_HOST) {
-            vma_debug("TIMER: Hyper-V detected, running nested checks");
-            check_nested = true;
-        }
-
-        bool serialize_available = cpu::is_intel();
-        if (serialize_available) {
-            /* SERIALIZE requires Ice Lake or newer */
-            u32 l7_eax = 0, l7_ebx = 0, l7_ecx = 0, l7_edx = 0;
-            cpu::cpuid(l7_eax, l7_ebx, l7_ecx, l7_edx, cpu::leaf::ext_features, 0);
-            if (!(l7_edx & (1u << 14))) {
-                serialize_available = false;
+        static const vmaware_technique timer_result = []() -> vmaware_technique {
+            if (util::is_x86_process_on_arm()) {
+                vma_debug("TIMER: Running inside a binary translation layer");
+                return false;
             }
-        }
 
-        VMAWARE_CONSTEXPR const u32 ct_seed = timer::config::get_seed();
-        const size_t batch_size = timer::config::generate_batch_size(ct_seed);
+            const GROUP_AFFINITY trigger_affinity = timer::scheduler::get_mask(true);
+            static GROUP_AFFINITY counter_affinity{};
+            counter_affinity = timer::scheduler::get_mask(false);
 
-        std::vector<timer::timer_tick_t> vm_samples(batch_size), ref_samples(batch_size); /* pre page-fault MMU, we won't warm-up cpuid samples for the P-states intentionally */
-        std::vector<timer::timer_tick_t> api_samples(batch_size), db_samples(batch_size);
-
-        /* Pre-reserve active sample vectors to eliminate ANY dynamic heap allocations inside the trial loop */
-        std::vector<timer::timer_tick_t> active_vm_samples, active_ref_samples;
-        std::vector<timer::timer_tick_t> active_api_samples, active_db_samples;
-        if (!check_nested) {
-            active_vm_samples.reserve(batch_size);
-            active_ref_samples.reserve(batch_size);
-        }
-        active_api_samples.reserve(batch_size);
-        active_db_samples.reserve(batch_size);
-
-        /* Lock the memory for the samples to prevent soft #PF during timing if permissions are enough */
-        const bool vm_samples_locked = VirtualLock(vm_samples.data(), batch_size * sizeof(timer::timer_tick_t));
-        const bool ref_samples_locked = VirtualLock(ref_samples.data(), batch_size * sizeof(timer::timer_tick_t));
-        const bool api_samples_locked = VirtualLock(api_samples.data(), batch_size * sizeof(timer::timer_tick_t));
-        const bool db_samples_locked = VirtualLock(db_samples.data(), batch_size * sizeof(timer::timer_tick_t));
-
-        static const HANDLE current_thread = reinterpret_cast<HANDLE>(-2LL);
-        const HANDLE current_process = reinterpret_cast<HANDLE>(-1LL);
-
-        GROUP_AFFINITY old_affinity{};
-        const DWORD old_process_priority = GetPriorityClass(current_process);
-        const int old_thread_priority = GetThreadPriority(current_thread);
-
-        auto cleanup = [&]() noexcept {
-            SetThreadPriorityBoost(current_thread, FALSE);
-            SetThreadPriority(current_thread, old_thread_priority);
-            SetPriorityClass(current_process, old_process_priority);
-            SetThreadGroupAffinity(current_thread, &old_affinity, nullptr);
-            if (vm_samples_locked) {
-                VirtualUnlock(vm_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+            if (!trigger_affinity.Mask || !counter_affinity.Mask) {
+                return false;
             }
-            if (ref_samples_locked) {
-                VirtualUnlock(ref_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+
+            const HMODULE ntdll = memory::get_module(true);
+            if (!ntdll) {
+                return false;
             }
-            if (api_samples_locked) {
-                VirtualUnlock(api_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+
+            constexpr const char* function_names[] = {
+                "ZwRaiseException"
+            };
+            void* functions[ARRAYSIZE(function_names)] = {};
+            memory::get_function(ntdll, function_names, functions, ARRAYSIZE(function_names));
+
+            using zw_raise_exception_fn = NTSTATUS(__stdcall*)(PEXCEPTION_RECORD, PCONTEXT, BOOLEAN);
+            zw_raise_exception_fn zw_raise_exception = reinterpret_cast<zw_raise_exception_fn>(functions[0]);
+            if (!zw_raise_exception) {
+                return false;
             }
-            if (db_samples_locked) {
-                VirtualUnlock(db_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+
+            /* Calculation of minimum threshold for instrution latency */
+            constexpr double threshold = 2.75;
+            bool check_nested = false;
+            if (util::hyper_x() == HYPERV_HOST) {
+                vma_debug("TIMER: Hyper-V detected, running nested checks");
+                check_nested = true;
             }
-        };
 
-        /* Prepare threads for check */
-        SetThreadGroupAffinity(current_thread, &trigger_affinity, &old_affinity);
-        SetPriorityClass(current_process, ABOVE_NORMAL_PRIORITY_CLASS); /* ABOVE_NORMAL_PRIORITY_CLASS + THREAD_PRIORITY_HIGHEST = 12 base priority */
-        SetThreadPriority(current_thread, THREAD_PRIORITY_HIGHEST);
-        SetThreadPriorityBoost(current_thread, TRUE); /* Disable dynamic thread priority adjustments by Windows, not turbo boosts by the hardware itself */
-
-        static timer::cache_state state;
-        static_assert(alignof(timer::cache_state) >= 64, "timer::cache_state must be aligned to 64 bytes to prevent cache-line thrashing (false sharing).");
-        static_assert(std::is_standard_layout<timer::cache_state>::value, "timer::cache_state must be standard layout for predictable memory offsets.");
-
-        state.counter = 0;
-        state.start_test.store(false, std::memory_order_relaxed);
-        state.test_done.store(false, std::memory_order_relaxed);
-
-        /* Our software clock */
-        auto counter_thread = []() noexcept -> void {
-            SetThreadGroupAffinity(current_thread, &counter_affinity, nullptr);
-            SetThreadPriority(current_thread, THREAD_PRIORITY_HIGHEST); /* Decrease chance of being rescheduled */
-            SetThreadPriorityBoost(current_thread, TRUE); /* Disable dynamic boosts */
-
-            timer::timer_tick_t local_counter = state.counter;
-
-            /* Better than calling incq in inline asm, as this forces standard increment cache behavior */
-            #define TICK8() \
-                local_counter++; state.counter = local_counter; \
-                local_counter++; state.counter = local_counter; \
-                local_counter++; state.counter = local_counter; \
-                local_counter++; state.counter = local_counter; \
-                local_counter++; state.counter = local_counter; \
-                local_counter++; state.counter = local_counter; \
-                local_counter++; state.counter = local_counter; \
-                local_counter++; state.counter = local_counter;
-
-            #define TICK64() \
-                TICK8(); TICK8(); TICK8(); TICK8(); \
-                TICK8(); TICK8(); TICK8(); TICK8();
-
-            #define TICK512() \
-                TICK64(); TICK64(); TICK64(); TICK64(); \
-                TICK64(); TICK64(); TICK64(); TICK64();
-
-            while (!state.start_test.load(std::memory_order_acquire)) {}
-
-            while (!state.test_done.load(std::memory_order_relaxed)) {
-                TICK512(); TICK512(); TICK512(); TICK512();
-                TICK512(); TICK512(); TICK512(); TICK512();
-            }
-            #undef TICK512
-            #undef TICK64
-            #undef TICK8
-        };
-
-        /* To isolate the SEH frame from C++ unwinding scopes */
-        struct exception_handler {
-            static VMAWARE_NOINLINE void execute_db() noexcept {
-                __try {
-                #if (VMAWARE_MSVC)
-                    const auto eflags = __readeflags();
-                    __writeeflags(eflags | 0x100);
-                    __nop();
-                #elif (VMAWARE_X86_64)
-                    __asm__ volatile (
-                        "pushfq \n\t"
-                        "orq $0x100, (%%rsp) \n\t"
-                        "popfq \n\t"
-                        "nop \n\t"
-                        :
-                    :
-                        : "cc", "memory"
-                    );
-                #else
-                    __asm__ volatile (
-                        "pushfl \n\t"
-                        "orl $0x100, (%%esp) \n\t"
-                        "popfl \n\t"
-                        "nop \n\t"
-                        :
-                    :
-                        : "cc", "memory"
-                    );
-                #endif
-                }
-                __except (
-                    GetExceptionCode() == EXCEPTION_SINGLE_STEP
-                    ? (GetExceptionInformation()->ContextRecord->EFlags &= ~0x100U, EXCEPTION_CONTINUE_EXECUTION)
-                    : EXCEPTION_CONTINUE_SEARCH
-                    ) {
+            bool serialize_available = cpu::is_intel();
+            if (serialize_available) {
+                /* SERIALIZE requires Ice Lake or newer */
+                u32 l7_eax = 0, l7_ebx = 0, l7_ecx = 0, l7_edx = 0;
+                cpu::cpuid(l7_eax, l7_ebx, l7_ecx, l7_edx, cpu::leaf::ext_features, 0);
+                if (!(l7_edx & (1u << 14))) {
+                    serialize_available = false;
                 }
             }
 
-            /* decltype to resolve the local function pointer type without template keywords */
-            static VMAWARE_NO_CFG void nt_raise_exception(
-                decltype(zw_raise_exception) zw_raise,
-                EXCEPTION_RECORD* er,
-                CONTEXT* ctx,
-                volatile bool* flag
-            ) noexcept {
-                __try {
-                #if (VMAWARE_X86_64)
-                    RtlCaptureContext(ctx);
-                #else
-                    /* On x86_32, RtlCaptureContext is unreliable under clang-cl with FPO */
-                    ctx->ContextFlags = CONTEXT_CONTROL;
-                    uintptr_t current_esp = 0;
-                    uintptr_t current_ebp = 0;
-                    uintptr_t current_eip = 0;
-                    u32 current_cs = 0;
-                    u32 current_ss = 0;
-                    u32 current_eflags = 0;
+            VMAWARE_CONSTEXPR const u32 ct_seed = timer::config::get_seed();
+            const size_t batch_size = timer::config::generate_batch_size(ct_seed);
 
-                    #if (VMAWARE_MSVC) /* This matches clang-cl on purpose */
-                        __asm {
-                            mov current_esp, esp
-                            mov current_ebp, ebp
+            std::vector<timer::timer_tick_t> vm_samples(batch_size), ref_samples(batch_size); /* pre page-fault MMU, we won't warm-up cpuid samples for the P-states intentionally */
+            std::vector<timer::timer_tick_t> api_samples(batch_size), db_samples(batch_size);
 
-                            xor eax, eax
-                            mov ax, cs
-                            mov current_cs, eax
-
-                            xor eax, eax
-                            mov ax, ss
-                            mov current_ss, eax
-
-                            call get_eip
-                            get_eip :
-                            pop eax
-                                mov current_eip, eax
-                        }
-                        current_eflags = static_cast<u32>(__readeflags());
-                    #else
-                        __asm__ volatile(
-                            "movl %%esp, %0 \n\t"
-                            "movl %%ebp, %1 \n\t"
-                            "mov %%cs, %2 \n\t"
-                            "mov %%ss, %3 \n\t"
-                            "pushfl \n\t"
-                            "popl %4 \n\t"
-                            "call 1f \n\t"
-                            "1: \n\t"
-                            "popl %5 \n\t"
-                            : "=r"(current_esp), "=r"(current_ebp), "=r"(current_cs), "=r"(current_ss), "=r"(current_eflags), "=r"(current_eip)
-                         );
-                    #endif
-
-                    ctx->Esp = current_esp;
-                    ctx->Ebp = current_ebp;
-                    ctx->Eip = current_eip;
-                    ctx->SegCs = current_cs;
-                    ctx->SegSs = current_ss;
-                    ctx->EFlags = current_eflags;
-                #endif
-                    * flag = true;
-                    zw_raise(er, ctx, 1);
-                }
-                __except (
-                    GetExceptionCode() == EXCEPTION_SINGLE_STEP
-                    ? EXCEPTION_EXECUTE_HANDLER
-                    : EXCEPTION_CONTINUE_SEARCH
-                    ) {
-                }
-            }
-        };
-
-        /* Independent multi-trial state initialization */
-        constexpr int trials = 5;
-        constexpr size_t local_max_attempts = 1000 * trials;
-        timer::timer_tick_t best_cpuid_l = (std::numeric_limits<timer::timer_tick_t>::max)();
-        timer::timer_tick_t best_ref_l = (std::numeric_limits<timer::timer_tick_t>::max)();
-        timer::timer_tick_t best_api_l = (std::numeric_limits<timer::timer_tick_t>::max)();
-        timer::timer_tick_t best_db_l = (std::numeric_limits<timer::timer_tick_t>::max)();
-
-        std::thread t1(counter_thread);
-        state.start_test.store(true, std::memory_order_release);
-
-        /* Cache and CPU scheduler warm-up won't affect anything in the measurement loop, so ramp up frequency/P-states to a high non-AVX Turbo/P-state without vmexits */
-        timer::engine::warmup_cpu(serialize_available);
-
-        /*
-         * state is a static local variable, so accessing state.counter directly requires the compiler to resolve its address using RIP-relative addressing or base-plus-displacement addressing on every single iteration
-         * depending on the compiler's O level and the presence of PIC/PIE, this can introduce small addressing calculations inside the loop, so by assigning the address to a local pointer outside the loop,
-         * we encourage the compiler to load this absolute pointer into a CPU register BEFORE the loop starts so at the end it translates to a simple mov
-        */
-        const volatile timer::timer_tick_t* const counter_ptr = &state.counter;
-
-        for (int trial = 0; trial < trials; ++trial) {
-            size_t valid = 0;
-            size_t invalid = 0;
-
-            /* Inside the timing windows, there must be zero memory output (no stack arrays can be written to), zero conditional branches and zero stack spilling (no register push/pops) */
+            /* Pre-reserve active sample vectors to eliminate ANY dynamic heap allocations inside the trial loop */
+            std::vector<timer::timer_tick_t> active_vm_samples, active_ref_samples;
+            std::vector<timer::timer_tick_t> active_api_samples, active_db_samples;
             if (!check_nested) {
-                if (serialize_available) {
-                    while (valid < batch_size && invalid < local_max_attempts) {
-                        /* cpuid and serialize/lfence interpolated so that any turbo boost, thermal throttling, speculation (for the loop overhead itself, not for the serializing instructions), etc affects samples equally */
-                        timer::timer_tick_t r_pre = 0, r_post = 0, v_pre = 0, v_post = 0, sync = 0;
+                active_vm_samples.reserve(batch_size);
+                active_ref_samples.reserve(batch_size);
+            }
+            active_api_samples.reserve(batch_size);
+            active_db_samples.reserve(batch_size);
 
-                        /* This is done as a counter to both legitimate and malicious hypervisors interrupts that may pause the counter thread while we measure */
-                        sync = *counter_ptr;
-                        while (*counter_ptr == sync); /* Infer if counter got enough quantum momentum (so its currently scheduled) */
+            /* Lock the memory for the samples to prevent soft #PF during timing if permissions are enough */
+            const bool vm_samples_locked = VirtualLock(vm_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+            const bool ref_samples_locked = VirtualLock(ref_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+            const bool api_samples_locked = VirtualLock(api_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+            const bool db_samples_locked = VirtualLock(db_samples.data(), batch_size * sizeof(timer::timer_tick_t));
 
-                        /*
-                         * SERIALIZE/LFENCE check is before CPUID on purpose, so that possible pauses when cpuid is executed do not affect SERIALIZE/LFENCE too. The hv needs to wait for cpuid to pause the thread
-                         * the amount of instructions (8 in case of LFENCE) are enough for the Cross-Core/Cross-CCD MESI RFO cache bounce in the data race so that the counter thread sees an increment
-                         */
-                        sync = *counter_ptr;
-                        VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                        while (*counter_ptr == sync); /* Fastest busy-waiting strategy, PAUSE can conditionally exit, calling APIs like SwitchToThread() would be even worse */
+            static const HANDLE current_thread = reinterpret_cast<HANDLE>(-2LL);
+            const HANDLE current_process = reinterpret_cast<HANDLE>(-1LL);
 
-                        r_pre = *counter_ptr;
-                        std::atomic_signal_fence(std::memory_order_acq_rel);
-                        _serialize();
-                        std::atomic_signal_fence(std::memory_order_acq_rel);
-                        r_post = *counter_ptr;
+            GROUP_AFFINITY old_affinity{};
+            const DWORD old_process_priority = GetPriorityClass(current_process);
+            const int old_thread_priority = GetThreadPriority(current_thread);
 
-                        sync = *counter_ptr;
-                        while (*counter_ptr == sync); /* sync to our counter tick again by spam hitting L3 */
-                        sync = *counter_ptr;
-                        VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                        while (*counter_ptr == sync); /* and again */
+            auto cleanup = [&]() noexcept {
+                SetThreadPriorityBoost(current_thread, FALSE);
+                SetThreadPriority(current_thread, old_thread_priority);
+                SetPriorityClass(current_process, old_process_priority);
+                SetThreadGroupAffinity(current_thread, &old_affinity, nullptr);
+                if (vm_samples_locked) {
+                    VirtualUnlock(vm_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+                }
+                if (ref_samples_locked) {
+                    VirtualUnlock(ref_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+                }
+                if (api_samples_locked) {
+                    VirtualUnlock(api_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+                }
+                if (db_samples_locked) {
+                    VirtualUnlock(db_samples.data(), batch_size * sizeof(timer::timer_tick_t));
+                }
+            };
 
-                        v_pre = *counter_ptr;
-                        std::atomic_signal_fence(std::memory_order_seq_cst); /* _ReadWriteBarrier() aka dont emit runtime fences */
-                    #if (VMAWARE_GCC || VMAWARE_CLANG)  
-                        size_t a = 0;
-                        size_t b = 0, c = 0, d = 0;
+            /* Prepare threads for check */
+            SetThreadGroupAffinity(current_thread, &trigger_affinity, &old_affinity);
+            SetPriorityClass(current_process, ABOVE_NORMAL_PRIORITY_CLASS); /* ABOVE_NORMAL_PRIORITY_CLASS + THREAD_PRIORITY_HIGHEST = 12 base priority */
+            SetThreadPriority(current_thread, THREAD_PRIORITY_HIGHEST);
+            SetThreadPriorityBoost(current_thread, TRUE); /* Disable dynamic thread priority adjustments by Windows, not turbo boosts by the hardware itself */
+
+            static timer::cache_state state;
+            static_assert(alignof(timer::cache_state) >= 64, "timer::cache_state must be aligned to 64 bytes to prevent cache-line thrashing (false sharing).");
+            static_assert(std::is_standard_layout<timer::cache_state>::value, "timer::cache_state must be standard layout for predictable memory offsets.");
+
+            state.counter = 0;
+            state.start_test.store(false, std::memory_order_relaxed);
+            state.test_done.store(false, std::memory_order_relaxed);
+
+            /* Our software clock */
+            auto counter_thread = []() noexcept -> void {
+                SetThreadGroupAffinity(current_thread, &counter_affinity, nullptr);
+                SetThreadPriority(current_thread, THREAD_PRIORITY_HIGHEST); /* Decrease chance of being rescheduled */
+                SetThreadPriorityBoost(current_thread, TRUE); /* Disable dynamic boosts */
+
+                timer::timer_tick_t local_counter = state.counter;
+
+                /* Better than calling incq in inline asm, as this forces standard increment cache behavior */
+                #define TICK8() \
+                    local_counter++; state.counter = local_counter; \
+                    local_counter++; state.counter = local_counter; \
+                    local_counter++; state.counter = local_counter; \
+                    local_counter++; state.counter = local_counter; \
+                    local_counter++; state.counter = local_counter; \
+                    local_counter++; state.counter = local_counter; \
+                    local_counter++; state.counter = local_counter; \
+                    local_counter++; state.counter = local_counter;
+
+                #define TICK64() \
+                    TICK8(); TICK8(); TICK8(); TICK8(); \
+                    TICK8(); TICK8(); TICK8(); TICK8();
+
+                #define TICK512() \
+                    TICK64(); TICK64(); TICK64(); TICK64(); \
+                    TICK64(); TICK64(); TICK64(); TICK64();
+
+                while (!state.start_test.load(std::memory_order_acquire)) {}
+
+                while (!state.test_done.load(std::memory_order_relaxed)) {
+                    TICK512(); TICK512(); TICK512(); TICK512();
+                    TICK512(); TICK512(); TICK512(); TICK512();
+                }
+                #undef TICK512
+                #undef TICK64
+                #undef TICK8
+            };
+
+            /* To isolate the SEH frame from C++ unwinding scopes */
+            struct exception_handler {
+                static VMAWARE_NOINLINE void execute_db() noexcept {
+                    __try {
+                    #if (VMAWARE_MSVC)
+                        const auto eflags = __readeflags();
+                        __writeeflags(eflags | 0x100);
+                        __nop();
+                    #elif (VMAWARE_X86_64)
                         __asm__ volatile (
-                            "cpuid"
-                            : "+a"(a), "=b"(b), "=c"(c), "=d"(d)
+                            "pushfq \n\t"
+                            "orq $0x100, (%%rsp) \n\t"
+                            "popfq \n\t"
+                            "nop \n\t"
+                            :
+                        :
+                            : "cc", "memory"
                         );
-                    #else   
-                        int dummy[4];
-                        __cpuid(dummy, 0);
+                    #else
+                        __asm__ volatile (
+                            "pushfl \n\t"
+                            "orl $0x100, (%%esp) \n\t"
+                            "popfl \n\t"
+                            "nop \n\t"
+                            :
+                        :
+                            : "cc", "memory"
+                        );
                     #endif
-                        std::atomic_signal_fence(std::memory_order_seq_cst);
-                        v_post = *counter_ptr;
-
-                        /* We dont filter by cycles spent here (for example by querying thread cycle time) because the kernel would use TSC and the point of this function is to not use TSC or any other clock */
-                        if (v_post > v_pre && r_post > r_pre) {
-                            vm_samples[valid] = v_post - v_pre;
-                            ref_samples[valid] = r_post - r_pre;
-                            valid++;
-                        }
-                        else {
-                            invalid++;
-                        }
-
-                        /* Burn cycles executing a random number of instructions in each loop iteration, so that the hypervisor doesn't know when to pause the counter thread */
-                        timer::engine::burn_random_cycles(ct_seed, v_post, r_post);
+                    }
+                    __except (
+                        GetExceptionCode() == EXCEPTION_SINGLE_STEP
+                        ? (GetExceptionInformation()->ContextRecord->EFlags &= ~0x100U, EXCEPTION_CONTINUE_EXECUTION)
+                        : EXCEPTION_CONTINUE_SEARCH
+                        ) {
                     }
                 }
-                else {
-                    while (valid < batch_size && invalid < local_max_attempts) {
-                        /* This block's logic is the same as above but using LFENCE instead of SERIALIZE, read code comments above */
-                        timer::timer_tick_t r_pre = 0, r_post = 0, v_pre = 0, v_post = 0, sync = 0;
 
-                        sync = *counter_ptr;
-                        while (*counter_ptr == sync);
-                        sync = *counter_ptr;
-                        VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                        while (*counter_ptr == sync);
+                /* decltype to resolve the local function pointer type without template keywords */
+                static VMAWARE_NO_CFG void nt_raise_exception(
+                    decltype(zw_raise_exception) zw_raise,
+                    EXCEPTION_RECORD* er,
+                    CONTEXT* ctx,
+                    volatile bool* flag
+                ) noexcept {
+                    __try {
+                    #if (VMAWARE_X86_64)
+                        RtlCaptureContext(ctx);
+                    #else
+                        /* On x86_32, RtlCaptureContext is unreliable under clang-cl with FPO */
+                        ctx->ContextFlags = CONTEXT_CONTROL;
+                        uintptr_t current_esp = 0;
+                        uintptr_t current_ebp = 0;
+                        uintptr_t current_eip = 0;
+                        u32 current_cs = 0;
+                        u32 current_ss = 0;
+                        u32 current_eflags = 0;
 
-                        r_pre = *counter_ptr;
-                        std::atomic_signal_fence(std::memory_order_acq_rel);
-                        _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
-                        _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
-                        std::atomic_signal_fence(std::memory_order_acq_rel);
-                        r_post = *counter_ptr;
+                        #if (VMAWARE_MSVC) /* This matches clang-cl on purpose */
+                            __asm {
+                                mov current_esp, esp
+                                mov current_ebp, ebp
 
-                        sync = *counter_ptr;
-                        while (*counter_ptr == sync);
-                        sync = *counter_ptr;
-                        VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                        while (*counter_ptr == sync);
+                                xor eax, eax
+                                mov ax, cs
+                                mov current_cs, eax
 
-                        v_pre = *counter_ptr;
-                        std::atomic_signal_fence(std::memory_order_seq_cst);
-                    #if (VMAWARE_GCC || VMAWARE_CLANG)
-                        size_t a = 0;
-                        size_t b = 0, c = 0, d = 0;
-                        __asm__ volatile (
-                            "cpuid"
-                            : "+a"(a), "=b"(b), "=c"(c), "=d"(d)
-                        );
-                        #else   
-                        int dummy[4];
-                        __cpuid(dummy, 0);
+                                xor eax, eax
+                                mov ax, ss
+                                mov current_ss, eax
+
+                                call get_eip
+                                get_eip :
+                                pop eax
+                                    mov current_eip, eax
+                            }
+                            current_eflags = static_cast<u32>(__readeflags());
+                        #else
+                            __asm__ volatile(
+                                "movl %%esp, %0 \n\t"
+                                "movl %%ebp, %1 \n\t"
+                                "mov %%cs, %2 \n\t"
+                                "mov %%ss, %3 \n\t"
+                                "pushfl \n\t"
+                                "popl %4 \n\t"
+                                "call 1f \n\t"
+                                "1: \n\t"
+                                "popl %5 \n\t"
+                                : "=r"(current_esp), "=r"(current_ebp), "=r"(current_cs), "=r"(current_ss), "=r"(current_eflags), "=r"(current_eip)
+                             );
+                        #endif
+
+                        ctx->Esp = current_esp;
+                        ctx->Ebp = current_ebp;
+                        ctx->Eip = current_eip;
+                        ctx->SegCs = current_cs;
+                        ctx->SegSs = current_ss;
+                        ctx->EFlags = current_eflags;
                     #endif
-                        std::atomic_signal_fence(std::memory_order_seq_cst);
-                        v_post = *counter_ptr;
-
-                        if (v_post > v_pre && r_post > r_pre) {
-                            vm_samples[valid] = v_post - v_pre;
-                            ref_samples[valid] = r_post - r_pre;
-                            valid++;
-                        }
-                        else {
-                            invalid++;
-                        }
-
-                        timer::engine::burn_random_cycles(ct_seed, v_post, r_post);
+                        * flag = true;
+                        zw_raise(er, ctx, 1);
                     }
+                    __except (
+                        GetExceptionCode() == EXCEPTION_SINGLE_STEP
+                        ? EXCEPTION_EXECUTE_HANDLER
+                        : EXCEPTION_CONTINUE_SEARCH
+                        ) {
+                    }
+                }
+            };
+
+            /* Independent multi-trial state initialization */
+            constexpr int trials = 5;
+            constexpr size_t local_max_attempts = 1000 * trials;
+            timer::timer_tick_t best_cpuid_l = (std::numeric_limits<timer::timer_tick_t>::max)();
+            timer::timer_tick_t best_ref_l = (std::numeric_limits<timer::timer_tick_t>::max)();
+            timer::timer_tick_t best_api_l = (std::numeric_limits<timer::timer_tick_t>::max)();
+            timer::timer_tick_t best_db_l = (std::numeric_limits<timer::timer_tick_t>::max)();
+
+            std::thread t1(counter_thread);
+            state.start_test.store(true, std::memory_order_release);
+
+            /* Cache and CPU scheduler warm-up won't affect anything in the measurement loop, so ramp up frequency/P-states to a high non-AVX Turbo/P-state without vmexits */
+            timer::engine::warmup_cpu(serialize_available);
+
+            /*
+             * state is a static local variable, so accessing state.counter directly requires the compiler to resolve its address using RIP-relative addressing or base-plus-displacement addressing on every single iteration
+             * depending on the compiler's O level and the presence of PIC/PIE, this can introduce small addressing calculations inside the loop, so by assigning the address to a local pointer outside the loop,
+             * we encourage the compiler to load this absolute pointer into a CPU register BEFORE the loop starts so at the end it translates to a simple mov
+            */
+            const volatile timer::timer_tick_t* const counter_ptr = &state.counter;
+
+            for (int trial = 0; trial < trials; ++trial) {
+                size_t valid = 0;
+                size_t invalid = 0;
+
+                /* Inside the timing windows, there must be zero memory output (no stack arrays can be written to), zero conditional branches and zero stack spilling (no register push/pops) */
+                if (!check_nested) {
+                    if (serialize_available) {
+                        while (valid < batch_size && invalid < local_max_attempts) {
+                            /* cpuid and serialize/lfence interpolated so that any turbo boost, thermal throttling, speculation (for the loop overhead itself, not for the serializing instructions), etc affects samples equally */
+                            timer::timer_tick_t r_pre = 0, r_post = 0, v_pre = 0, v_post = 0, sync = 0;
+
+                            /* This is done as a counter to both legitimate and malicious hypervisors interrupts that may pause the counter thread while we measure */
+                            sync = *counter_ptr;
+                            while (*counter_ptr == sync); /* Infer if counter got enough quantum momentum (so its currently scheduled) */
+
+                            /*
+                             * SERIALIZE/LFENCE check is before CPUID on purpose, so that possible pauses when cpuid is executed do not affect SERIALIZE/LFENCE too. The hv needs to wait for cpuid to pause the thread
+                             * the amount of instructions (8 in case of LFENCE) are enough for the Cross-Core/Cross-CCD MESI RFO cache bounce in the data race so that the counter thread sees an increment
+                             */
+                            sync = *counter_ptr;
+                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                            while (*counter_ptr == sync); /* Fastest busy-waiting strategy, PAUSE can conditionally exit, calling APIs like SwitchToThread() would be even worse */
+
+                            r_pre = *counter_ptr;
+                            std::atomic_signal_fence(std::memory_order_acq_rel);
+                            _serialize();
+                            std::atomic_signal_fence(std::memory_order_acq_rel);
+                            r_post = *counter_ptr;
+
+                            sync = *counter_ptr;
+                            while (*counter_ptr == sync); /* sync to our counter tick again by spam hitting L3 */
+                            sync = *counter_ptr;
+                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                            while (*counter_ptr == sync); /* and again */
+
+                            v_pre = *counter_ptr;
+                            std::atomic_signal_fence(std::memory_order_seq_cst); /* _ReadWriteBarrier() aka dont emit runtime fences */
+                        #if (VMAWARE_GCC || VMAWARE_CLANG)  
+                            size_t a = 0;
+                            size_t b = 0, c = 0, d = 0;
+                            __asm__ volatile (
+                                "cpuid"
+                                : "+a"(a), "=b"(b), "=c"(c), "=d"(d)
+                            );
+                        #else   
+                            int dummy[4];
+                            __cpuid(dummy, 0);
+                        #endif
+                            std::atomic_signal_fence(std::memory_order_seq_cst);
+                            v_post = *counter_ptr;
+
+                            /* We dont filter by cycles spent here (for example by querying thread cycle time) because the kernel would use TSC and the point of this function is to not use TSC or any other clock */
+                            if (v_post > v_pre && r_post > r_pre) {
+                                vm_samples[valid] = v_post - v_pre;
+                                ref_samples[valid] = r_post - r_pre;
+                                valid++;
+                            }
+                            else {
+                                invalid++;
+                            }
+
+                            /* Burn cycles executing a random number of instructions in each loop iteration, so that the hypervisor doesn't know when to pause the counter thread */
+                            timer::engine::burn_random_cycles(ct_seed, v_post, r_post);
+                        }
+                    }
+                    else {
+                        while (valid < batch_size && invalid < local_max_attempts) {
+                            /* This block's logic is the same as above but using LFENCE instead of SERIALIZE, read code comments above */
+                            timer::timer_tick_t r_pre = 0, r_post = 0, v_pre = 0, v_post = 0, sync = 0;
+
+                            sync = *counter_ptr;
+                            while (*counter_ptr == sync);
+                            sync = *counter_ptr;
+                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                            while (*counter_ptr == sync);
+
+                            r_pre = *counter_ptr;
+                            std::atomic_signal_fence(std::memory_order_acq_rel);
+                            _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
+                            _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
+                            std::atomic_signal_fence(std::memory_order_acq_rel);
+                            r_post = *counter_ptr;
+
+                            sync = *counter_ptr;
+                            while (*counter_ptr == sync);
+                            sync = *counter_ptr;
+                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                            while (*counter_ptr == sync);
+
+                            v_pre = *counter_ptr;
+                            std::atomic_signal_fence(std::memory_order_seq_cst);
+                        #if (VMAWARE_GCC || VMAWARE_CLANG)
+                            size_t a = 0;
+                            size_t b = 0, c = 0, d = 0;
+                            __asm__ volatile (
+                                "cpuid"
+                                : "+a"(a), "=b"(b), "=c"(c), "=d"(d)
+                            );
+                            #else   
+                            int dummy[4];
+                            __cpuid(dummy, 0);
+                        #endif
+                            std::atomic_signal_fence(std::memory_order_seq_cst);
+                            v_post = *counter_ptr;
+
+                            if (v_post > v_pre && r_post > r_pre) {
+                                vm_samples[valid] = v_post - v_pre;
+                                ref_samples[valid] = r_post - r_pre;
+                                valid++;
+                            }
+                            else {
+                                invalid++;
+                            }
+
+                            timer::engine::burn_random_cycles(ct_seed, v_post, r_post);
+                        }
+                    }
+
+                    if (valid > 0) {
+                        /* Discard the unused default-initialized zero-elements */
+                        active_vm_samples.assign(vm_samples.begin(), vm_samples.begin() + valid);
+                        active_ref_samples.assign(ref_samples.begin(), ref_samples.begin() + valid);
+
+                        /* Check for lowest dense cluster with no interrupt spikes, filter noise we can't directly detect (SMIs, NMIs, etc) */
+                        const timer::timer_tick_t cpuid_l = timer::engine::calculate_latency(active_vm_samples);
+                        const timer::timer_tick_t ref_l = timer::engine::calculate_latency(active_ref_samples);
+
+                        /* Record the cleanest/lowest latency observed across the independent trials */
+                        if (cpuid_l < best_cpuid_l) {
+                            best_cpuid_l = cpuid_l;
+                        }
+                        if (ref_l < best_ref_l) {
+                            best_ref_l = ref_l;
+                        }
+                    }
+                }
+
+                valid = 0;
+                invalid = 0;
+
+                /*
+                 * I choose #DB because it forces a L0 to L1 nested vmexit when Hyper-V is running
+                 * L0 must sync the exception bitmap with L1 in order for this to receive pending events, as the CPU always jumps to the hv running on the metal
+                 * VMCB/VMCS public dumps shows Hyper-V intercepts #DB, #AC and #MC
+                 */
+                volatile bool flag = false;
+                alignas(16) CONTEXT ctx {};
+                EXCEPTION_RECORD er{};
+
+                while (valid < batch_size && invalid < local_max_attempts) {
+                    timer::timer_tick_t db_pre = 0, db_post = 0, api_pre = 0, api_post = 0, sync = 0;
+
+                    sync = *counter_ptr;
+                    while (*counter_ptr == sync);
+                    sync = *counter_ptr;
+                    VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                    while (*counter_ptr == sync);
+
+                    db_pre = *counter_ptr;
+                    std::atomic_signal_fence(std::memory_order_acq_rel);
+                    exception_handler::execute_db();
+                    std::atomic_signal_fence(std::memory_order_acq_rel);
+                    db_post = *counter_ptr;
+
+                    sync = *counter_ptr;
+                    while (*counter_ptr == sync);
+                    sync = *counter_ptr;
+                    VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                    while (*counter_ptr == sync);
+
+                    ctx.ContextFlags = CONTEXT_FULL;
+                    er.ExceptionCode = EXCEPTION_SINGLE_STEP;
+                    er.ExceptionFlags = 0;
+
+                    api_pre = *counter_ptr;
+                    std::atomic_signal_fence(std::memory_order_acq_rel);
+                    exception_handler::nt_raise_exception(zw_raise_exception, &er, &ctx, &flag);
+                    std::atomic_signal_fence(std::memory_order_acq_rel);
+                    api_post = *counter_ptr;
+
+                    if (api_post > api_pre && db_post > db_pre) {
+                        api_samples[valid] = api_post - api_pre;
+                        db_samples[valid] = db_post - db_pre;
+                        valid++;
+                    }
+                    else {
+                        invalid++;
+                    }
+
+                    timer::engine::burn_random_cycles(ct_seed, api_post, db_post);
                 }
 
                 if (valid > 0) {
-                    /* Discard the unused default-initialized zero-elements */
-                    active_vm_samples.assign(vm_samples.begin(), vm_samples.begin() + valid);
-                    active_ref_samples.assign(ref_samples.begin(), ref_samples.begin() + valid);
+                    active_api_samples.assign(api_samples.begin(), api_samples.begin() + valid);
+                    active_db_samples.assign(db_samples.begin(), db_samples.begin() + valid);
 
-                    /* Check for lowest dense cluster with no interrupt spikes, filter noise we can't directly detect (SMIs, NMIs, etc) */
-                    const timer::timer_tick_t cpuid_l = timer::engine::calculate_latency(active_vm_samples);
-                    const timer::timer_tick_t ref_l = timer::engine::calculate_latency(active_ref_samples);
+                    const timer::timer_tick_t api_l = timer::engine::calculate_latency(active_api_samples);
+                    const timer::timer_tick_t db_l = timer::engine::calculate_latency(active_db_samples);
 
-                    /* Record the cleanest/lowest latency observed across the independent trials */
-                    if (cpuid_l < best_cpuid_l) {
-                        best_cpuid_l = cpuid_l;
+                    if (api_l < best_api_l) {
+                        best_api_l = api_l;
                     }
-                    if (ref_l < best_ref_l) {
-                        best_ref_l = ref_l;
+                    if (db_l < best_db_l) {
+                        best_db_l = db_l;
                     }
                 }
             }
 
-            valid = 0;
-            invalid = 0;
+            state.test_done.store(true, std::memory_order_release);
+            t1.join();
 
-            /*
-             * I choose #DB because it forces a L0 to L1 nested vmexit when Hyper-V is running
-             * L0 must sync the exception bitmap with L1 in order for this to receive pending events, as the CPU always jumps to the hv running on the metal
-             * VMCB/VMCS public dumps shows Hyper-V intercepts #DB, #AC and #MC
-             */
-            volatile bool flag = false;
-            alignas(16) CONTEXT ctx {};
-            EXCEPTION_RECORD er{};
+            cleanup();
 
-            while (valid < batch_size && invalid < local_max_attempts) {
-                timer::timer_tick_t db_pre = 0, db_post = 0, api_pre = 0, api_post = 0, sync = 0;
+            constexpr auto uninitialized_tick = (std::numeric_limits<timer::timer_tick_t>::max)();
+            const bool invalid_measurement = (!check_nested && best_ref_l == uninitialized_tick && best_cpuid_l == uninitialized_tick) || (best_db_l == uninitialized_tick && best_api_l == uninitialized_tick);
 
-                sync = *counter_ptr;
-                while (*counter_ptr == sync);
-                sync = *counter_ptr;
-                VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                while (*counter_ptr == sync);
+            bool hypervisor_detected = false;
 
-                db_pre = *counter_ptr;
-                std::atomic_signal_fence(std::memory_order_acq_rel);
-                exception_handler::execute_db();
-                std::atomic_signal_fence(std::memory_order_acq_rel);
-                db_post = *counter_ptr;
+            /* Analyze instruction latency results and report exactly what VMAware found */
+            if (!invalid_measurement) {
+                if (!check_nested) {
+                    /* VMM = Time spent in hypervisor and bare metal; nVMM = Time spent in bare metal */
+                    const double latency_ratio = best_ref_l ? (double)best_cpuid_l / (double)best_ref_l : 0;
+                    vma_debug("TIMER: CPU supports SERIALIZE: ", serialize_available);
+                    vma_debug("TIMER: Instruction > VMM -> ", best_cpuid_l, " | nVMM -> ", best_ref_l, " | Ratio -> ", latency_ratio);
 
-                sync = *counter_ptr;
-                while (*counter_ptr == sync);
-                sync = *counter_ptr;
-                VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                while (*counter_ptr == sync);
-
-                ctx.ContextFlags = CONTEXT_FULL;
-                er.ExceptionCode = EXCEPTION_SINGLE_STEP;
-                er.ExceptionFlags = 0;
-
-                api_pre = *counter_ptr;
-                std::atomic_signal_fence(std::memory_order_acq_rel);
-                exception_handler::nt_raise_exception(zw_raise_exception, &er, &ctx, &flag);
-                std::atomic_signal_fence(std::memory_order_acq_rel);
-                api_post = *counter_ptr;
-
-                if (api_post > api_pre && db_post > db_pre) {
-                    api_samples[valid] = api_post - api_pre;
-                    db_samples[valid] = db_post - db_pre;
-                    valid++;
-                }
-                else {
-                    invalid++;
+                    /* High latency can occur even with CPUID interception disabled if vCPU pinning is not 1:1, thus detecting the hypervisor, as this is a cache-based counter */
+                    if (latency_ratio >= threshold) {
+                        vma_debug("TIMER: Detected #VMEXIT latency");
+                        hypervisor_detected = true;
+                    }
+                    else if (best_cpuid_l >= 12000 || best_ref_l >= 12000) { /* If latency is abnormally high, it means something was spamming interrupts */
+                        vma_debug("TIMER: Detected artificial IPI delivery to timing threads");
+                        hypervisor_detected = true;
+                    }
                 }
 
-                timer::engine::burn_random_cycles(ct_seed, api_post, db_post);
-            }
+                const double exception_ratio = best_db_l ? (double)best_db_l / (double)best_api_l : 0.0;
+                vma_debug("TIMER: Exception > VMM -> ", best_db_l, " | nVMM -> ", best_api_l, " | Ratio -> ", exception_ratio);
 
-            if (valid > 0) {
-                active_api_samples.assign(api_samples.begin(), api_samples.begin() + valid);
-                active_db_samples.assign(db_samples.begin(), db_samples.begin() + valid);
-
-                const timer::timer_tick_t api_l = timer::engine::calculate_latency(active_api_samples);
-                const timer::timer_tick_t db_l = timer::engine::calculate_latency(active_db_samples);
-
-                if (api_l < best_api_l) {
-                    best_api_l = api_l;
-                }
-                if (db_l < best_db_l) {
-                    best_db_l = db_l;
-                }
-            }
-        }
-
-        state.test_done.store(true, std::memory_order_release);
-        t1.join();
-
-        cleanup();
-
-        constexpr auto uninitialized_tick = (std::numeric_limits<timer::timer_tick_t>::max)();
-        const bool invalid_measurement = (!check_nested && best_ref_l == uninitialized_tick && best_cpuid_l == uninitialized_tick) || (best_db_l == uninitialized_tick && best_api_l == uninitialized_tick);
-
-        bool hypervisor_detected = false;
-
-        /* Analyze instruction latency results and report exactly what VMAware found */
-        if (!invalid_measurement) {
-            if (!check_nested) {
-                /* VMM = Time spent in hypervisor and bare metal; nVMM = Time spent in bare metal */
-                const double latency_ratio = best_ref_l ? (double)best_cpuid_l / (double)best_ref_l : 0;
-                vma_debug("TIMER: CPU supports SERIALIZE: ", serialize_available);
-                vma_debug("TIMER: Instruction > VMM -> ", best_cpuid_l, " | nVMM -> ", best_ref_l, " | Ratio -> ", latency_ratio);
-
-                /* High latency can occur even with CPUID interception disabled if vCPU pinning is not 1:1, thus detecting the hypervisor, as this is a cache-based counter */
-                if (latency_ratio >= threshold) {
-                    vma_debug("TIMER: Detected #VMEXIT latency");
-                    hypervisor_detected = true;
-                }
-                else if (best_cpuid_l >= 12000 || best_ref_l >= 12000) { /* If latency is abnormally high, it means something was spamming interrupts */
-                    vma_debug("TIMER: Detected artificial IPI delivery to timing threads");
+                if (exception_ratio >= 2.5) {
+                    vma_debug("TIMER: Detected #DB interception latency");
                     hypervisor_detected = true;
                 }
             }
 
-            const double exception_ratio = best_db_l ? (double)best_db_l / (double)best_api_l : 0.0;
-            vma_debug("TIMER: Exception > VMM -> ", best_db_l, " | nVMM -> ", best_api_l, " | Ratio -> ", exception_ratio);
-
-            if (exception_ratio >= 2.5) {
-                vma_debug("TIMER: Detected #DB interception latency");
-                hypervisor_detected = true;
+            if (hypervisor_detected) {
+                return true;
             }
-        }
+            return false;
+        }();
 
-        return hypervisor_detected;
+        return timer_result;
     #endif
     }
 #endif
@@ -17413,16 +17274,15 @@ public:
 
     struct core {
         struct technique {
-            const char* name;
             u8 points;
             vmaware_technique(*run)();
 
             constexpr technique() noexcept
-                : name(""), points(0), run(nullptr) {
+                : points(0), run(nullptr) {
             }
 
-            constexpr technique(const char* name, u8 points, vmaware_technique(*run)()) noexcept
-                : name(name), points(points), run(run) {
+            constexpr technique(u8 points, vmaware_technique(*run)()) noexcept
+                : points(points), run(run) {
             }
         };
 
@@ -17512,21 +17372,12 @@ public:
 
             const u16 threshold_points = core::is_enabled(flags, HIGH_THRESHOLD) ? high_threshold_score : threshold_score;
 
-            auto dispatch_check = [&](u16 id, const technique& tech) -> bool {
-                if (!tech.run || core::is_disabled(flags, static_cast<u8>(id))) {
-                    return false;
-                }
+            /* 1. Built-in techniques loop */
+            for (size_t i = technique_begin; i < technique_end; ++i) {
+                const technique& tech = technique_table[i];
 
-                if (memo::is_cached(id)) {
-                    const memo::data_t data = memo::cache_fetch(id);
-                    if (data.result) {
-                        points += data.points;
-                        detected_count_num++;
-                        if (data.brand_name != brand_enum::NULL_BRAND) {
-                            brand_scoreboard[static_cast<size_t>(data.brand_name)].score++;
-                        }
-                    }
-                    return shortcut && (points >= threshold_points);
+                if (!tech.run || core::is_disabled(flags, static_cast<u8>(i))) {
+                    continue;
                 }
 
                 const vmaware_technique res = tech.run();
@@ -17542,18 +17393,9 @@ public:
                     if (res.extra_brand != brand_enum::NULL_BRAND) {
                         brand_scoreboard[static_cast<size_t>(res.extra_brand)].score++;
                     }
-                    memo::cache_store(id, true, pts, res.brand);
-                }
-                else {
-                    memo::cache_store(id, false, 0, brand_enum::NULL_BRAND);
                 }
 
-                return shortcut && (points >= threshold_points);
-            };
-
-            /* 1. Built-in techniques loop */
-            for (size_t i = technique_begin; i < technique_end; ++i) {
-                if (dispatch_check(static_cast<u16>(i), technique_table[i])) {
+                if (shortcut && (points >= threshold_points)) {
                     return points;
                 }
             }
@@ -17564,27 +17406,10 @@ public:
                     continue;
                 }
 
-                if (memo::is_cached(custom.id)) {
-                    const memo::data_t data = memo::cache_fetch(custom.id);
-                    if (data.result) {
-                        points += data.points;
-                        detected_count_num++;
-                    }
-                    if (shortcut && (points >= threshold_points)) {
-                        return points;
-                    }
-                    continue;
-                }
-
-                /* Run user custom technique */
                 const bool res = custom.run();
                 if (res) {
                     points += custom.points;
                     detected_count_num++;
-                    memo::cache_store(custom.id, true, custom.points, brand_enum::NULL_BRAND);
-                }
-                else {
-                    memo::cache_store(custom.id, false, 0, brand_enum::NULL_BRAND);
                 }
 
                 if (shortcut && (points >= threshold_points)) {
@@ -17805,7 +17630,6 @@ public:
         VMAWARE_UNUSED(loc);
     #endif
         if (VMAWARE_UNLIKELY(util::is_unsupported(flag_bit))) {
-            memo::cache_store(flag_bit, false, 0);
             return false;
         }
 
@@ -17835,12 +17659,6 @@ public:
             throw_error("Flag argument must be a technique flag and not a settings flag");
         }
 
-        /* If the technique is already cached, return the cached value instead */
-        if (memo::is_cached(flag_bit)) {
-            const memo::data_t data = memo::cache_fetch(flag_bit);
-            return data.result;
-        }
-
         if (flag_bit >= technique_end) {
             return false;
         }
@@ -17850,13 +17668,9 @@ public:
 
         if (auto run_fn = pair.run) {
             const vmaware_technique res = run_fn();
-            const u8 points_to_add = (res.score > 0) ? res.score : pair.points;
-
             if (res.detected) {
                 detected_count_num++;
             }
-
-            memo::cache_store(flag_bit, res.detected, res.detected ? points_to_add : 0, res.brand);
             return res.detected;
         }
 
@@ -18060,17 +17874,109 @@ public:
      * @param single technique flag in VM structure
      */
     [[nodiscard]] static std::string flag_to_string(const enum_flags flag) {
-        if (static_cast<u8>(flag) < static_cast<u8>(technique_end) && core::technique_table[flag].name != nullptr && core::technique_table[flag].name[0] != '\0') {
-            return std::string(core::technique_table[flag].name);
-        }
         switch (flag) {
-            case DEFAULT:        return "DEFAULT";
-            case ALL:            return "ALL";
-            case NULL_ARG:       return "NULL_ARG";
-            case HIGH_THRESHOLD: return "HIGH_THRESHOLD";
-            case DYNAMIC:        return "DYNAMIC";
-            case MULTIPLE:       return "MULTIPLE";
-            default:             return "Unknown flag";
+            /* Cross-platform & Architecture */
+            case VMID:                return "VMID";
+            case CPU_BRAND:           return "CPU_BRAND";
+            case HYPERVISOR_BIT:      return "HYPERVISOR_BIT";
+            case HYPERVISOR_STR:      return "HYPERVISOR_STR";
+            case TIMER:               return "TIMER";
+            case THREAD_MISMATCH:     return "THREAD_MISMATCH";
+            case CPUID_SIGNATURE:     return "CPUID_SIGNATURE";
+            case BOCHS_CPU:           return "BOCHS_CPU";
+            case KGT_SIGNATURE:       return "KGT_SIGNATURE";
+
+            /* Windows */
+            case GPU_CAPABILITIES:    return "GPU_CAPABILITIES";
+            case ACPI_SIGNATURE:      return "ACPI_SIGNATURE";
+            case POWER_CAPABILITIES:  return "POWER_CAPABILITIES";
+            case DRIVERS:             return "DRIVERS";
+            case HANDLES:             return "HANDLES";
+            case VIRTUAL_PROCESSORS:  return "VIRTUAL_PROCESSORS";
+            case DISPLAY:             return "DISPLAY";
+            case DLL:                 return "DLL";
+            case WINE:                return "WINE";
+            case VIRTUAL_REGISTRY:    return "VIRTUAL_REGISTRY";
+            case MUTEX:               return "MUTEX";
+            case VPC_INVALID:         return "VPC_INVALID";
+            case VMWARE_STR:          return "VMWARE_STR";
+            case GAMARUE:             return "GAMARUE";
+            case CUCKOO:              return "CUCKOO";
+            case TRAP:                return "TRAP";
+            case UD:                  return "UD";
+            case INTERRUPT_SHADOW:    return "INTERRUPT_SHADOW";
+            case DBVM:                return "DBVM";
+            case KERNEL_OBJECTS:      return "KERNEL_OBJECTS";
+            case NVRAM:               return "NVRAM";
+            case CPU_HEURISTIC:       return "CPU_HEURISTIC";
+            case MSR:                 return "MSR";
+            case KVM_INTERCEPTION:    return "KVM_INTERCEPTION";
+            case HYPERVISOR_HOOK:     return "HYPERVISOR_HOOK";
+            case SINGLE_STEP:         return "SINGLE_STEP";
+            case EIP_OVERFLOW:        return "EIP_OVERFLOW";
+            case SVM_EXCEPTIONS:      return "SVM_EXCEPTIONS";
+            case MEASURED_BOOT:       return "MEASURED_BOOT";
+            case TPM:                 return "TPM";
+            case VCPU_SCHEDULING:     return "VCPU_SCHEDULING";
+            case EMULATION:           return "EMULATION";
+
+            /* Linux and Windows */
+            case SYSTEM_REGISTERS:    return "SYSTEM_REGISTERS";
+            case FIRMWARE:            return "FIRMWARE";
+            case DEVICES:             return "DEVICES";
+            case AZURE:               return "AZURE";
+            case BOOT_LOGO:           return "BOOT_LOGO";
+            case DISK:                return "DISK";
+
+            /* Linux */
+            case SMBIOS_VM_BIT:       return "SMBIOS_VM_BIT";
+            case KMSG:                return "KMSG";
+            case CVENDOR:             return "CVENDOR";
+            case QEMU_FW_CFG:         return "QEMU_FW_CFG";
+            case SYSTEMD:             return "SYSTEMD";
+            case CTYPE:               return "CTYPE";
+            case DOCKERENV:           return "DOCKERENV";
+            case DMIDECODE:           return "DMIDECODE";
+            case DMESG:               return "DMESG";
+            case HWMON:               return "HWMON";
+            case LINUX_USER_HOST:     return "LINUX_USER_HOST";
+            case QEMU_VIRTUAL_DMI:    return "QEMU_VIRTUAL_DMI";
+            case QEMU_USB:            return "QEMU_USB";
+            case HYPERVISOR_DIR:      return "HYPERVISOR_DIR";
+            case UML_CPU:             return "UML_CPU";
+            case VBOX_MODULE:         return "VBOX_MODULE";
+            case SYSINFO_PROC:        return "SYSINFO_PROC";
+            case DMI_SCAN:            return "DMI_SCAN";
+            case PODMAN_FILE:         return "PODMAN_FILE";
+            case WSL_PROC:            return "WSL_PROC";
+            case MAC:                 return "MAC";
+            case CONTAINER_PID:       return "CONTAINER_PID";
+            case BLUESTACKS_FOLDERS:  return "BLUESTACKS_FOLDERS";
+            case AMD_SEV_MSR:         return "AMD_SEV_MSR";
+            case TEMPERATURE:         return "TEMPERATURE";
+            case CGROUP:              return "CGROUP";
+            case PROCESSES:           return "PROCESSES";
+
+            /* Linux and MacOS */
+            case THREAD_COUNT:        return "THREAD_COUNT";
+
+            /* MacOS */
+            case MAC_MEMSIZE:         return "MAC_MEMSIZE";
+            case MAC_IOKIT:           return "MAC_IOKIT";
+            case MAC_SIP:             return "MAC_SIP";
+            case IOREG_GREP:          return "IOREG_GREP";
+            case HWMODEL:             return "HWMODEL";
+            case MAC_SYS:             return "MAC_SYS";
+
+           /* Settings */
+            case DEFAULT:             return "DEFAULT";
+            case ALL:                 return "ALL";
+            case NULL_ARG:            return "NULL_ARG";
+            case HIGH_THRESHOLD:      return "HIGH_THRESHOLD";
+            case DYNAMIC:             return "DYNAMIC";
+            case MULTIPLE:            return "MULTIPLE";
+
+            default:                  return "Unknown flag";
         }
     }
 
@@ -18262,10 +18168,6 @@ public:
 
 
     static std::string conclusion(const flagset& flags = core::generate_default()) {
-        if (memo::conclusion::is_cached(flags)) {
-            return memo::conclusion::fetch();
-        }
-
         const u8 percent_tmp = percentage(flags);
         
         constexpr const char* very_unlikely = "Very unlikely";
@@ -18333,8 +18235,6 @@ public:
                 brand_str + 
                 /* Hyper-V artifacts are an exception due to how unique the circumstance is */
                 (first_brand == brand_enum::HYPERV_ROOT ? "" : " VM");
-
-            memo::conclusion::store(result.c_str(), flags);
 
             return result;
         };
@@ -18410,8 +18310,6 @@ public:
  * These are added here due to warnings related to C++17 inline variables for C++ standards that are under 17
  * It's easier to just group them together rather than having C++17<= preprocessors with inline stuff
  */
-char VM::memo::conclusion::cache[512] = { 0 };
-bool VM::memo::conclusion::cached = false;
 
 /* Scoreboard list of brands, if a VM detection technique detects a brand, that will be incremented here as a single point */
 std::array<VM::core::brand_entry, VM::MAX_BRANDS> VM::core::brand_scoreboard = []() {
@@ -18427,28 +18325,17 @@ std::array<VM::core::brand_entry, VM::MAX_BRANDS> VM::core::brand_scoreboard = [
 static_assert(VM::core::brand_scoreboard.size() == VM::MAX_BRANDS, "brand_scoreboard size must match MAX_BRANDS.");
 
 /* Initial definitions for cache items because C++ forbids in-class initializations */
-VM::flagset VM::memo::conclusion::cached_flags{};
-VM::flagset VM::memo::single_brand::cached_flags{};
-VM::flagset VM::memo::multi_brand::cached_flags{};
-VM::flagset VM::memo::brand_list::cached_flags{};
-VM::brand_list_t VM::memo::brand_list::cache = {};
 VM::hyperx_state VM::memo::hyperx::state = VM::HYPERV_UNKNOWN;
-std::array<VM::memo::cache_entry, VM::enum_size + 1> VM::memo::cache_table{};
 std::array<VM::memo::leaf_entry, VM::memo::leaf_cache::CAPACITY> VM::memo::leaf_cache::table{};
-std::string VM::memo::multi_brand::brand_cache;
 std::size_t VM::memo::leaf_cache::count = 0;
 std::size_t VM::memo::leaf_cache::next_index = 0;
-enum VM::brand_enum VM::memo::single_brand::brand_cache = brand_enum::NULL_BRAND;
 char VM::memo::cpu_brand::brand_cache[128] = { 0 };
 char VM::memo::bios_info::manufacturer[256] = { 0 };
 char VM::memo::bios_info::model[256] = { 0 };
 bool VM::memo::bios_info::cached_manufacturer;
 bool VM::memo::bios_info::cached_model;
-bool VM::memo::single_brand::cached = false;
-bool VM::memo::multi_brand::cached = false;
 bool VM::memo::cpu_brand::cached = false;
 bool VM::memo::hyperx::cached = false;
-bool VM::memo::brand_list::cached = false;
 
 /*
  * These are basically the base values for the core::arg_handler function.
@@ -18479,102 +18366,104 @@ std::array<VM::core::technique, VM::enum_size + 1> VM::core::technique_table = [
     std::array<VM::core::technique, VM::enum_size + 1> table{};
     /* FORMAT: { VM::<ID>, { certainty%, function pointer } }, */
     const VM::core::technique_entry entries[] = {
+        // START OF TECHNIQUE TABLE
         #if (VMAWARE_WINDOWS)
-            { VM::TRAP,{ "TRAP",                150, VM::trap } },
-            { VM::KVM_INTERCEPTION,{ "KVM_INTERCEPTION",    150, VM::kvm_interception } },
-            { VM::SVM_EXCEPTIONS,{ "SVM_EXCEPTIONS",       35, VM::svm_exceptions } },
-            { VM::MEASURED_BOOT,{ "MEASURED_BOOT",       150, VM::measured_boot } },
-            { VM::INTERRUPT_SHADOW,{ "INTERRUPT_SHADOW",    150, VM::interrupt_shadow } },
-            { VM::EIP_OVERFLOW,{ "EIP_OVERFLOW",        150, VM::eip_overflow } },
-            { VM::HYPERVISOR_HOOK,{ "HYPERVISOR_HOOK",     150, VM::hypervisor_hook } },
-            { VM::SINGLE_STEP,{ "SINGLE_STEP",         150, VM::single_step } },
-            { VM::TPM,{ "TPM",                  45, VM::tpm } },
-            { VM::VCPU_SCHEDULING,{ "VCPU_SCHEDULING",     100, VM::vcpu_scheduling } },
-            { VM::NVRAM, { "NVRAM",               100, VM::nvram } },
-            { VM::CPU_HEURISTIC,{ "CPU_HEURISTIC",        90, VM::cpu_heuristic } },
-            { VM::ACPI_SIGNATURE,{ "ACPI_SIGNATURE",      100, VM::acpi_signature } },
-            { VM::POWER_CAPABILITIES,{ "POWER_CAPABILITIES",   25, VM::power_capabilities } },
-            { VM::GPU_CAPABILITIES,{ "GPU_CAPABILITIES",     20, VM::gpu_capabilities } },
-            { VM::MSR,{ "MSR",                 100, VM::msr } },
-            { VM::VIRTUAL_PROCESSORS,{ "VIRTUAL_PROCESSORS",  100, VM::virtual_processors } },
-            { VM::WINE,{ "WINE",                150, VM::wine } },
-            { VM::DBVM,{ "DBVM",                150, VM::dbvm } },
-            { VM::UD,{ "UD",                  100, VM::ud } },
-            { VM::DRIVERS,{ "DRIVERS",             100, VM::drivers } },
-            { VM::HANDLES,{ "HANDLES",             100, VM::device_handles } },
-            { VM::KERNEL_OBJECTS,{ "KERNEL_OBJECTS",      100, VM::kernel_objects } },
-            { VM::EMULATION,{ "EMULATION",           100, VM::emulation } },
-            { VM::DLL,{ "DLL",                  50, VM::dll } },
-            { VM::DISPLAY,{ "DISPLAY",              25, VM::display } },
-            { VM::VIRTUAL_REGISTRY,{ "VIRTUAL_REGISTRY",    100, VM::virtual_registry } },
-            { VM::MUTEX,{ "MUTEX",               100, VM::mutex } },
-            { VM::VPC_INVALID,{ "VPC_INVALID",          75, VM::vpc_invalid } },
-            { VM::VMWARE_STR,{ "VMWARE_STR",           35, VM::vmware_str } },
-            { VM::GAMARUE,{ "GAMARUE",              30, VM::gamarue } },
-            { VM::CUCKOO,{ "CUCKOO",               30, VM::cuckoo } },
+            { VM::TRAP,{ 150, VM::trap } },
+            { VM::KVM_INTERCEPTION,{ 150, VM::kvm_interception } },
+            { VM::SVM_EXCEPTIONS,{ 35, VM::svm_exceptions } },
+            { VM::MEASURED_BOOT,{ 150, VM::measured_boot } },
+            { VM::INTERRUPT_SHADOW,{ 150, VM::interrupt_shadow } },
+            { VM::EIP_OVERFLOW,{ 150, VM::eip_overflow } },
+            { VM::HYPERVISOR_HOOK,{ 150, VM::hypervisor_hook } },
+            { VM::SINGLE_STEP,{ 150, VM::single_step } },
+            { VM::TPM,{ 45, VM::tpm } },
+            { VM::VCPU_SCHEDULING,{ 100, VM::vcpu_scheduling } },
+            { VM::NVRAM,{ 100, VM::nvram } },
+            { VM::CPU_HEURISTIC,{ 90, VM::cpu_heuristic } },
+            { VM::ACPI_SIGNATURE,{ 100, VM::acpi_signature } },
+            { VM::POWER_CAPABILITIES,{ 25, VM::power_capabilities } },
+            { VM::GPU_CAPABILITIES,{ 20, VM::gpu_capabilities } },
+            { VM::MSR,{ 100, VM::msr } },
+            { VM::VIRTUAL_PROCESSORS,{ 100, VM::virtual_processors } },
+            { VM::WINE,{ 150, VM::wine } },
+            { VM::DBVM,{ 150, VM::dbvm } },
+            { VM::UD,{ 100, VM::ud } },
+            { VM::DRIVERS,{ 100, VM::drivers } },
+            { VM::HANDLES,{ 100, VM::device_handles } },
+            { VM::KERNEL_OBJECTS,{ 100, VM::kernel_objects } },
+            { VM::EMULATION,{ 100, VM::emulation } },
+            { VM::DLL,{ 50, VM::dll } },
+            { VM::DISPLAY,{ 25, VM::display } },
+            { VM::VIRTUAL_REGISTRY,{ 100, VM::virtual_registry } },
+            { VM::MUTEX,{ 100, VM::mutex } },
+            { VM::VPC_INVALID,{ 75, VM::vpc_invalid } },
+            { VM::VMWARE_STR,{ 35, VM::vmware_str } },
+            { VM::GAMARUE,{ 30, VM::gamarue } },
+            { VM::CUCKOO,{ 30, VM::cuckoo } },
         #endif
 
         #if (VMAWARE_LINUX || VMAWARE_WINDOWS)
-            { VM::FIRMWARE,{ "FIRMWARE",            100, VM::firmware } },
-            { VM::DEVICES,{ "DEVICES",              95, VM::devices } },
-            { VM::SYSTEM_REGISTERS,{ "SYSTEM_REGISTERS",     50, VM::system_registers } },
-            { VM::AZURE,{ "AZURE",                30, VM::azure } },
-            { VM::BOOT_LOGO,{ "BOOT_LOGO",            90, VM::boot_logo } },
-            { VM::DISK,{ "DISK",                150, VM::disk } },
+            { VM::FIRMWARE,{ 100, VM::firmware } },
+            { VM::DEVICES,{ 95, VM::devices } },
+            { VM::SYSTEM_REGISTERS,{ 50, VM::system_registers } },
+            { VM::AZURE,{ 30, VM::azure } },
+            { VM::BOOT_LOGO,{ 90, VM::boot_logo } },
+            { VM::DISK,{ 150, VM::disk } },
         #endif
 
         #if (VMAWARE_LINUX)
-            { VM::SMBIOS_VM_BIT,{ "SMBIOS_VM_BIT",        50, VM::smbios_vm_bit } },
-            { VM::KMSG,{ "KMSG",                  5, VM::kmsg } },
-            { VM::CVENDOR,{ "CVENDOR",              65, VM::chassis_vendor } },
-            { VM::QEMU_FW_CFG,{ "QEMU_FW_CFG",          70, VM::qemu_fw_cfg } },
-            { VM::SYSTEMD,{ "SYSTEMD",              35, VM::systemd_virt } },
-            { VM::CTYPE,{ "CTYPE",                20, VM::chassis_type } },
-            { VM::DOCKERENV,{ "DOCKERENV",           100, VM::dockerenv } },
-            { VM::DMIDECODE,{ "DMIDECODE",            55, VM::dmidecode } },
-            { VM::DMESG,{ "DMESG",                55, VM::dmesg } },
-            { VM::HWMON,{ "HWMON",                35, VM::hwmon } },
-            { VM::LINUX_USER_HOST,{ "LINUX_USER_HOST",      10, VM::linux_user_host } },
-            { VM::QEMU_VIRTUAL_DMI,{ "QEMU_VIRTUAL_DMI",     40, VM::qemu_virtual_dmi } },
-            { VM::QEMU_USB,{ "QEMU_USB",             20, VM::qemu_usb } },
-            { VM::HYPERVISOR_DIR,{ "HYPERVISOR_DIR",       20, VM::hypervisor_dir } },
-            { VM::UML_CPU,{ "UML_CPU",              80, VM::uml_cpu } },
-            { VM::VBOX_MODULE,{ "VBOX_MODULE",          15, VM::vbox_module } },
-            { VM::SYSINFO_PROC,{ "SYSINFO_PROC",         15, VM::sysinfo_proc } },
-            { VM::DMI_SCAN,{ "DMI_SCAN",             50, VM::dmi_scan } },
-            { VM::PODMAN_FILE,{ "PODMAN_FILE",           5, VM::podman_file } },
-            { VM::WSL_PROC,{ "WSL_PROC",             30, VM::wsl_proc_subdir } },
-            { VM::MAC,{ "MAC",                  20, VM::mac_address_check } },
-            { VM::CONTAINER_PID,{ "CONTAINER_PID",        75, VM::container_proc_id } },
-            { VM::BLUESTACKS_FOLDERS,{ "BLUESTACKS_FOLDERS",    5, VM::bluestacks } },
-            { VM::AMD_SEV_MSR,{ "AMD_SEV_MSR",          50, VM::amd_sev_msr } },
-            { VM::TEMPERATURE,{ "TEMPERATURE",          20, VM::temperature } },
-            { VM::CGROUP,{ "CGROUP",               70, VM::cgroup } },
-            { VM::PROCESSES,{ "PROCESSES",            40, VM::processes } },
+            { VM::SMBIOS_VM_BIT,{ 50, VM::smbios_vm_bit } },
+            { VM::KMSG,{ 5, VM::kmsg } },
+            { VM::CVENDOR,{ 65, VM::chassis_vendor } },
+            { VM::QEMU_FW_CFG,{ 70, VM::qemu_fw_cfg } },
+            { VM::SYSTEMD,{ 35, VM::systemd_virt } },
+            { VM::CTYPE,{ 20, VM::chassis_type } },
+            { VM::DOCKERENV,{ 100, VM::dockerenv } },
+            { VM::DMIDECODE,{ 55, VM::dmidecode } },
+            { VM::DMESG,{ 55, VM::dmesg } },
+            { VM::HWMON,{ 35, VM::hwmon } },
+            { VM::LINUX_USER_HOST,{ 10, VM::linux_user_host } },
+            { VM::QEMU_VIRTUAL_DMI,{ 40, VM::qemu_virtual_dmi } },
+            { VM::QEMU_USB,{ 20, VM::qemu_usb } },
+            { VM::HYPERVISOR_DIR,{ 20, VM::hypervisor_dir } },
+            { VM::UML_CPU,{ 80, VM::uml_cpu } },
+            { VM::VBOX_MODULE,{ 15, VM::vbox_module } },
+            { VM::SYSINFO_PROC,{ 15, VM::sysinfo_proc } },
+            { VM::DMI_SCAN,{ 50, VM::dmi_scan } },
+            { VM::PODMAN_FILE,{ 5, VM::podman_file } },
+            { VM::WSL_PROC,{ 30, VM::wsl_proc_subdir } },
+            { VM::MAC,{ 20, VM::mac_address_check } },
+            { VM::CONTAINER_PID,{ 75, VM::container_proc_id } },
+            { VM::BLUESTACKS_FOLDERS,{ 5, VM::bluestacks } },
+            { VM::AMD_SEV_MSR,{ 50, VM::amd_sev_msr } },
+            { VM::TEMPERATURE,{ 20, VM::temperature } },
+            { VM::CGROUP,{ 70, VM::cgroup } },
+            { VM::PROCESSES,{ 40, VM::processes } },
         #endif    
 
         #if (VMAWARE_LINUX || VMAWARE_APPLE)
-            { VM::THREAD_COUNT,{ "THREAD_COUNT",         35, VM::thread_count } },
+            { VM::THREAD_COUNT,{ 35, VM::thread_count } },
         #endif
 
         #if (VMAWARE_APPLE)
-            { VM::MAC_MEMSIZE,{ "MAC_MEMSIZE",          15, VM::hw_memsize } },
-            { VM::MAC_IOKIT,{ "MAC_IOKIT",           100, VM::io_kit } },
-            { VM::MAC_SIP,{ "MAC_SIP",             100, VM::mac_sip } },
-            { VM::IOREG_GREP,{ "IOREG_GREP",          100, VM::ioreg_grep } },
-            { VM::HWMODEL,{ "HWMODEL",             100, VM::hwmodel } },
-            { VM::MAC_SYS,{ "MAC_SYS",             100, VM::mac_sys } },
+            { VM::MAC_MEMSIZE,{ 15, VM::hw_memsize } },
+            { VM::MAC_IOKIT,{ 100, VM::io_kit } },
+            { VM::MAC_SIP,{ 100, VM::mac_sip } },
+            { VM::IOREG_GREP,{ 100, VM::ioreg_grep } },
+            { VM::HWMODEL,{ 100, VM::hwmodel } },
+            { VM::MAC_SYS,{ 100, VM::mac_sys } },
         #endif
 
-        { VM::TIMER,{ "TIMER",                45, VM::timer } },
-        { VM::THREAD_MISMATCH,{ "THREAD_MISMATCH",      45, VM::thread_mismatch } },
-        { VM::VMID,{ "VMID",                100, VM::vmid } },
-        { VM::CPU_BRAND,{ "CPU_BRAND",            95, VM::cpu_brand } },
-        { VM::CPUID_SIGNATURE,{ "CPUID_SIGNATURE",      95, VM::cpuid_signature } },
-        { VM::HYPERVISOR_STR,{ "HYPERVISOR_STR",      150, VM::hypervisor_str } },
-        { VM::HYPERVISOR_BIT,{ "HYPERVISOR_BIT",      150, VM::hypervisor_bit } },
-        { VM::BOCHS_CPU,{ "BOCHS_CPU",           100, VM::bochs_cpu } },
-        { VM::KGT_SIGNATURE,{ "KGT_SIGNATURE",        80, VM::intel_kgt_signature } }
+        { VM::TIMER,{ 45, VM::timer } },
+        { VM::THREAD_MISMATCH,{ 45, VM::thread_mismatch } },
+        { VM::VMID,{ 100, VM::vmid } },
+        { VM::CPU_BRAND,{ 95, VM::cpu_brand } },
+        { VM::CPUID_SIGNATURE,{ 95, VM::cpuid_signature } },
+        { VM::HYPERVISOR_STR,{ 150, VM::hypervisor_str } },
+        { VM::HYPERVISOR_BIT,{ 150, VM::hypervisor_bit } },
+        { VM::BOCHS_CPU,{ 100, VM::bochs_cpu } },
+        { VM::KGT_SIGNATURE,{ 80, VM::intel_kgt_signature } }
+        /* END OF TECHNIQUE TABLE */
     };
 
     /* Fill the table based on ID */

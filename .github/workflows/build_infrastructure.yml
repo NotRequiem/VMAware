@@ -665,28 +665,6 @@ jobs:
           $bin = Get-ChildItem build\vmaware32_debug -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
           pwsh auxiliary/test_cli.ps1 -BIN $bin -TIMEOUT_SECS 10
 
-  memoize-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install g++
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends g++
-
-      - name: Compile memoize test
-        run: |
-          g++ -std=c++20 -O2 -Wall -Wextra -Wconversion -Wdouble-promotion \
-              -Wno-unused-parameter -Wno-unused-function -Wno-sign-conversion \
-              -D__VMAWARE_RELEASE__ \
-              -o memoize_test auxiliary/memoize_test.cpp
-
-      - name: Run memoize test
-        run: ./memoize_test
-
   vm-output-test-linux:
     needs: [linux]
     runs-on: ubuntu-latest
@@ -943,7 +921,7 @@ jobs:
       - run: echo "All VM output tests completed"
 
   completed:
-    needs: [platform-builds, cli-tests, memoize-test, vm-output-tests]
+    needs: [platform-builds, cli-tests, vm-output-tests]
     runs-on: ubuntu-latest
     steps:
       - run: echo "All checks passed"
