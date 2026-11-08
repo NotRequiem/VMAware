@@ -4,7 +4,7 @@
  * ██║   ██║██╔████╔██║███████║██║ █╗ ██║███████║██████╔╝█████╗
  * ╚██╗ ██╔╝██║╚██╔╝██║██╔══██║██║███╗██║██╔══██║██╔══██╗██╔══╝
  *  ╚████╔╝ ██║ ╚═╝ ██║██║  ██║╚███╔███╔╝██║  ██║██║  ██║███████╗
- *   ╚═══╝  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ 2.8.2 (September 2026)
+ *   ╚═══╝  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ 2.8.2 (November 2026)
  *
  *  C++ VM detection library
  *
@@ -1148,6 +1148,41 @@ public:
     static_assert(version != nullptr && version[0] != '\0', "version string cannot be empty");
     static_assert(version[0] >= '0' && version[0] <= '9', "version string must start with a digit (use '2.8.2', do not include 'v')");
     static_assert(version_major >= 10 || version[0] == static_cast<char>('0' + version_major), "Mismatch: the first character of version string does not match version_major");
+
+    struct vmaware_technique {
+        bool detected;
+        brand_enum brand;
+        brand_enum extra_brand;
+        u8 score;
+
+        constexpr vmaware_technique() noexcept
+            : detected(false), brand(brand_enum::NULL_BRAND), extra_brand(brand_enum::NULL_BRAND), score(0) {
+        }
+
+        /* Implicit conversion from bool: allows return true; and return false; */
+        constexpr vmaware_technique(const bool d) noexcept
+            : detected(d), brand(brand_enum::NULL_BRAND), extra_brand(brand_enum::NULL_BRAND), score(0) {
+        }
+
+        /* Direct constructors used by core::add */
+        constexpr vmaware_technique(const bool d, const brand_enum b, u8 s = 0) noexcept
+            : detected(d), brand(b), extra_brand(brand_enum::NULL_BRAND), score(s) {
+        }
+
+        constexpr vmaware_technique(const bool d, const brand_enum b, const brand_enum e, const u8 s) noexcept
+            : detected(d), brand(b), extra_brand(e), score(s) {
+        }
+
+        /* Implicit conversion to bool */
+        constexpr operator bool() const noexcept {
+            return detected;
+        }
+
+        /* Chain operator: handles stuff like vmid_template(1) || vmid_template(2) */
+        friend constexpr vmaware_technique operator||(const vmaware_technique& a, const vmaware_technique& b) noexcept {
+            return a.detected ? a : b;
+        }
+    };
 
     /* Specifically for util::hyper_x() and memo::hyperv */
     enum hyperx_state : u8 {
@@ -5226,7 +5261,7 @@ public:
         #endif
         }
 
-        [[nodiscard]] static bool is_admin() noexcept {
+        [[nodiscard]] static vmaware_technique is_admin() noexcept {
         #if (VMAWARE_LINUX || VMAWARE_APPLE)
             return (geteuid() == 0);
         #elif (VMAWARE_WINDOWS)
@@ -5541,7 +5576,7 @@ public:
         }
 
 
-        [[nodiscard]] static bool is_x86_process_on_arm() {
+        [[nodiscard]] static vmaware_technique is_x86_process_on_arm() {
             static const bool cached = []() -> bool {
             #if (VMAWARE_WINDOWS)
                 const char* brand = cpu::get_brand();
@@ -6204,7 +6239,7 @@ public:
         }
 
     #if (VMAWARE_WINDOWS)
-        [[nodiscard]] static bool is_windows_11() {
+        [[nodiscard]] static vmaware_technique is_windows_11() {
             const HMODULE ntdll = memory::get_module(true);
             if (!ntdll) {
                 return false;
@@ -6226,7 +6261,7 @@ public:
             return rtl_get_version(&vi) == 0 && vi.dwBuildNumber >= 22000;
         }
 
-        [[nodiscard]] static bool is_windows_8_or_newer() {
+        [[nodiscard]] static vmaware_technique is_windows_8_or_newer() {
             const HMODULE ntdll = memory::get_module(true);
             if (!ntdll) {
                 return false;
@@ -6248,7 +6283,7 @@ public:
             return (rtl_get_version(&vi) == 0 && (vi.dwMajorVersion > 6 || (vi.dwMajorVersion == 6 && vi.dwMinorVersion >= 2)));
         }
 
-        [[nodiscard]] static bool is_32bit_execution_disabled() noexcept {
+        [[nodiscard]] static vmaware_technique is_32bit_execution_disabled() noexcept {
         #if (VMAWARE_X86_64)
             wchar_t wow64_dir[MAX_PATH] = { 0 };
             const UINT ret = GetSystemWow64DirectoryW(wow64_dir, MAX_PATH);
@@ -6927,7 +6962,7 @@ public:
      * @category x86
      * @implements VM::VMID
      */
-     [[nodiscard]] static bool vmid() {
+     [[nodiscard]] static vmaware_technique vmid() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -6945,7 +6980,7 @@ public:
      * @category x86
      * @implements VM::CPU_BRAND
      */
-     [[nodiscard]] static bool cpu_brand() {
+     [[nodiscard]] static vmaware_technique cpu_brand() {
      #if (!VMAWARE_X86)
          return false;
      #else
@@ -7000,7 +7035,7 @@ public:
      * @category x86
      * @implements VM::HYPERVISOR_BIT
      */
-    [[nodiscard]] static bool hypervisor_bit() {
+    [[nodiscard]] static vmaware_technique hypervisor_bit() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -7037,7 +7072,7 @@ public:
      * @category x86
      * @implements VM::HYPERVISOR_STR
      */
-    [[nodiscard]] static bool hypervisor_str() {
+    [[nodiscard]] static vmaware_technique hypervisor_str() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -7068,7 +7103,7 @@ public:
      * @author Discovered by Peter Ferrie, Senior Principal Researcher, Symantec Advanced Threat Research peter_ferrie@symantec.com
      * @implements VM::BOCHS_CPU
      */
-    [[nodiscard]] static bool bochs_cpu() {
+    [[nodiscard]] static vmaware_technique bochs_cpu() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -7143,7 +7178,7 @@ public:
      * @category x86
      * @implements VM::THREAD_MISMATCH
      */
-    [[nodiscard]] static bool thread_mismatch() {
+    [[nodiscard]] static vmaware_technique thread_mismatch() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -7468,7 +7503,7 @@ public:
      * @category x86
      * @implements VM::CPUID_SIGNATURE
      */
-    [[nodiscard]] static bool cpuid_signature() {
+    [[nodiscard]] static vmaware_technique cpuid_signature() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -7624,7 +7659,7 @@ public:
      * @category x86
      * @implements VM::KGT_SIGNATURE
      */
-    [[nodiscard]] static bool intel_kgt_signature() {
+    [[nodiscard]] static vmaware_technique intel_kgt_signature() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -7650,7 +7685,7 @@ public:
      * @category Windows, x86
      * @implements VM::TIMER
      */
-    [[nodiscard]] static bool timer() VMAWARE_SERIALIZE {
+    [[nodiscard]] static vmaware_technique timer() VMAWARE_SERIALIZE {
     #if (VMAWARE_X86 && VMAWARE_WINDOWS)
         if (util::is_x86_process_on_arm()) {
             vma_debug("TIMER: Running inside a binary translation layer");
@@ -8180,7 +8215,6 @@ public:
 
         return hypervisor_detected;
     #endif
-        return false;
     }
 #endif
 
@@ -8195,7 +8229,7 @@ public:
      * @category Linux
      * @implements VM::SYSTEMD
      */
-    [[nodiscard]] static bool systemd_virt() {
+    [[nodiscard]] static vmaware_technique systemd_virt() {
         if (!(util::exists("/usr/bin/systemd-detect-virt") || util::exists("/bin/systemd-detect-virt"))) {
             vma_debug("SYSTEMD: ", "binary doesn't exist");
             return false;
@@ -8219,7 +8253,7 @@ public:
      * @category Linux
      * @implements VM::CVENDOR
      */
-    [[nodiscard]] static bool chassis_vendor() {
+    [[nodiscard]] static vmaware_technique chassis_vendor() {
         const char* vendor_file = "/sys/devices/virtual/dmi/id/chassis_vendor";
 
         if (!util::exists(vendor_file)) {
@@ -8244,7 +8278,7 @@ public:
      * @category Linux
      * @implements VM::CTYPE
      */
-    [[nodiscard]] static bool chassis_type() {
+    [[nodiscard]] static vmaware_technique chassis_type() {
         const char* chassis = "/sys/devices/virtual/dmi/id/chassis_type";
 
         if (util::exists(chassis)) {
@@ -8267,7 +8301,7 @@ public:
      * @category Linux
      * @implements VM::DOCKERENV
      */
-    [[nodiscard]] static bool dockerenv() {
+    [[nodiscard]] static vmaware_technique dockerenv() {
         if (util::exists("/.dockerenv") || util::exists("/.dockerinit")) {
             return core::add(brand_enum::DOCKER);
         }
@@ -8282,7 +8316,7 @@ public:
      * @warning Permissions required
      * @implements VM::DMIDECODE
      */
-    [[nodiscard]] static bool dmidecode() {
+    [[nodiscard]] static vmaware_technique dmidecode() {
         auto is_admin = []() -> bool {
             return geteuid() == 0;
         };
@@ -8375,7 +8409,7 @@ public:
      * @category Linux
      * @implements VM::MAC
      */
-    [[nodiscard]] static bool mac_address_check() {
+    [[nodiscard]] static vmaware_technique mac_address_check() {
         struct fdguard {
             int fd;
             explicit fdguard(int fd = -1) : fd(fd) {}
@@ -8492,7 +8526,7 @@ public:
      * @warning Permissions required
      * @implements VM::DMESG
      */
-    [[nodiscard]] static bool dmesg() {
+    [[nodiscard]] static vmaware_technique dmesg() {
         auto is_admin = []() -> bool {
             return geteuid() == 0;
         };
@@ -8589,7 +8623,7 @@ public:
      * @category Linux
      * @implements VM::HWMON
      */
-    [[nodiscard]] static bool hwmon() {
+    [[nodiscard]] static vmaware_technique hwmon() {
         return (!util::exists("/sys/class/hwmon/"));
     }
 
@@ -8599,7 +8633,7 @@ public:
      * @category Linux
      * @implements VM::LINUX_USER_HOST
      */
-    [[nodiscard]] static bool linux_user_host() {
+    [[nodiscard]] static vmaware_technique linux_user_host() {
         if (util::is_admin()) {
             return false;
         }
@@ -8627,7 +8661,7 @@ public:
      * @category ARM, Linux
      * @implements VM::BLUESTACKS_FOLDERS
      */
-    [[nodiscard]] static bool bluestacks() {
+    [[nodiscard]] static vmaware_technique bluestacks() {
     #if (!VMAWARE_ARM)
         return false;
     #else
@@ -8649,7 +8683,7 @@ public:
      * @warning Permissions required
      * @implements VM::AMD_SEV_MSR
 	 */
-	[[nodiscard]] static bool amd_sev_msr() {
+	[[nodiscard]] static vmaware_technique amd_sev_msr() {
     #if (VMAWARE_X86 && (VMAWARE_LINUX || VMAWARE_APPLE))
         if (!cpu::is_amd()) {
             return false;
@@ -8714,7 +8748,7 @@ public:
      * @category Linux
      * @implements VM::QEMU_VIRTUAL_DMI
      */
-    [[nodiscard]] static bool qemu_virtual_dmi() {
+    [[nodiscard]] static vmaware_technique qemu_virtual_dmi() {
         const char* sys_vendor = "/sys/devices/virtual/dmi/id/sys_vendor";
         const char* modalias = "/sys/devices/virtual/dmi/id/modalias";
 
@@ -8737,7 +8771,7 @@ public:
      * @warning Permissions required
      * @implements VM::QEMU_USB
      */
-    [[nodiscard]] static bool qemu_usb() {
+    [[nodiscard]] static vmaware_technique qemu_usb() {
         if (!util::is_admin()) {
             return false;
         }
@@ -8765,7 +8799,7 @@ public:
      * @category Linux
      * @implements VM::HYPERVISOR_DIR
      */
-    [[nodiscard]] static bool hypervisor_dir() {
+    [[nodiscard]] static vmaware_technique hypervisor_dir() {
         struct dir_deleter {
             void operator()(DIR* d) const {
                 if (d != nullptr) {
@@ -8822,7 +8856,7 @@ public:
      * @category Linux
      * @implements VM::UML_CPU
      */
-    [[nodiscard]] static bool uml_cpu() {
+    [[nodiscard]] static vmaware_technique uml_cpu() {
         /* Method 1, get the CPU brand model */
         const std::string brand = cpu::get_brand();
 
@@ -8852,7 +8886,7 @@ public:
      * @warning Permissions required
      * @implements VM::KMSG
      */
-    [[nodiscard]] static bool kmsg() {
+    [[nodiscard]] static vmaware_technique kmsg() {
         if (!util::is_admin()) {
             return false;
         }
@@ -8916,7 +8950,7 @@ public:
      * @category Linux
      * @implements VM::VBOX_MODULE
      */
-    [[nodiscard]] static bool vbox_module() {
+    [[nodiscard]] static vmaware_technique vbox_module() {
         const char* file = "/proc/modules";
 
         if (!util::exists(file)) {
@@ -8939,7 +8973,7 @@ public:
      * @category Linux
      * @implements VM::SYSINFO_PROC
      */
-    [[nodiscard]] static bool sysinfo_proc() {
+    [[nodiscard]] static vmaware_technique sysinfo_proc() {
         const char* file = "/proc/sysinfo";
 
         if (!util::exists(file)) {
@@ -8961,7 +8995,7 @@ public:
      * @category Linux
      * @implements VM::DMI_SCAN
      */
-    [[nodiscard]] static bool dmi_scan() {
+    [[nodiscard]] static vmaware_technique dmi_scan() {
         /*
          *  cat: /sys/class/dmi/id/board_serial:   Permission denied
          *  cat: /sys/class/dmi/id/chassis_serial: Permission denied
@@ -9036,7 +9070,7 @@ public:
      * @warning Permissions required
      * @implements VM::SMBIOS_VM_BIT
      */
-    [[nodiscard]] static bool smbios_vm_bit() {
+    [[nodiscard]] static vmaware_technique smbios_vm_bit() {
         if (!util::is_admin()) {
             return false;
         }
@@ -9065,7 +9099,7 @@ public:
      * @category Linux
      * @implements VM::PODMAN_FILE
      */
-    [[nodiscard]] static bool podman_file() {
+    [[nodiscard]] static vmaware_technique podman_file() {
         if (util::exists("/run/.containerenv")) {
             return core::add(brand_enum::PODMAN);
         }
@@ -9079,7 +9113,7 @@ public:
      * @category Linux
      * @implements VM::WSL_PROC
      */
-    [[nodiscard]] static bool wsl_proc_subdir() {
+    [[nodiscard]] static vmaware_technique wsl_proc_subdir() {
         auto read_proc_nonblock = [](const char* path) -> std::string {
             const int fd = open(path, O_RDONLY | O_NONBLOCK);
 
@@ -9123,7 +9157,7 @@ public:
      * @category Linux
      * @implements VM::QEMU_FW_CFG
      */
-     [[nodiscard]] static bool qemu_fw_cfg() {
+     [[nodiscard]] static vmaware_technique qemu_fw_cfg() {
         /*
          * Linux DT method: inspired by https://github.com/ShellCode33/VM-Detection
          * Linux sysfs method: looks for /sys/module/qemu_fw_cfg/ & /sys/firmware/qemu_fw_cfg/
@@ -9155,7 +9189,7 @@ public:
      * @category Linux
      * @implements VM::CONTAINER_PID
      */
-    [[nodiscard]] static bool container_proc_id() {
+    [[nodiscard]] static vmaware_technique container_proc_id() {
         std::ifstream status_file("/proc/self/status");
         if (!status_file.is_open()) {
             return false;
@@ -9208,7 +9242,7 @@ public:
      * @category Linux
      * @implements VM::TEMPERATURE
      */
-    [[nodiscard]] static bool temperature() {
+    [[nodiscard]] static vmaware_technique temperature() {
         if (util::exists("/sys/class/thermal/cooling_device0")) {
             return false;
         }
@@ -9221,7 +9255,7 @@ public:
      * @category Linux
      * @implements VM::CGROUP
      */
-    [[nodiscard]] static bool cgroup() {
+    [[nodiscard]] static vmaware_technique cgroup() {
         const std::string contents = util::read_file("/proc/self/cgroup");
         
         if (contents.empty()) {
@@ -9291,7 +9325,7 @@ public:
      * @category Linux
      * @implements VM::PROCESSES
      */
-    [[nodiscard]] static bool processes() {
+    [[nodiscard]] static vmaware_technique processes() {
         if (util::is_proc_running("qemu_ga")) {
             vma_debug("PROCESSES: Detected QEMU guest agent process.");
             return core::add(brand_enum::QEMU);
@@ -9336,7 +9370,7 @@ public:
      * @author Idea to check VPC's range from Tom Liston and Ed Skoudis' paper "On the Cutting Edge: Thwarting Virtual Machine Detection" (Windows)
      * 
      */
-    [[nodiscard]] static bool system_registers() {
+    [[nodiscard]] static vmaware_technique system_registers() {
         if (util::is_x86_process_on_arm()) {
             return false;
         }
@@ -9605,7 +9639,7 @@ public:
      * @category Windows, Linux
      * @implements VM::AZURE
      */
-    [[nodiscard]] static bool azure() noexcept {
+    [[nodiscard]] static vmaware_technique azure() noexcept {
     #if (VMAWARE_WINDOWS)
         char buf[MAX_COMPUTERNAME_LENGTH + 1] = { 0 };
         DWORD len = sizeof(buf);
@@ -9653,7 +9687,7 @@ public:
      * @warning Permissions required on Linux
      * @implements VM::FIRMWARE
      */
-    [[nodiscard]] static bool firmware() {
+    [[nodiscard]] static vmaware_technique firmware() {
     #pragma pack(push, 1)
         struct acpi_header {
             char signature[4];
@@ -10522,7 +10556,7 @@ public:
      * @category Linux, Windows
      * @implements VM::DEVICES
      */
-    [[nodiscard]] static bool devices() {
+    [[nodiscard]] static vmaware_technique devices() {
         struct pci_device { u16 vendor_id; u32 device_id; };
         std::vector<pci_device> devices;
 
@@ -10867,7 +10901,7 @@ public:
      * @author Teselka (https://github.com/Teselka)
      * @implements VM::BOOT_LOGO
      */
-    [[nodiscard]] static bool boot_logo()
+    [[nodiscard]] static vmaware_technique boot_logo()
     #if (VMAWARE_X86 && (VMAWARE_CLANG || VMAWARE_GCC))
         __attribute__((__target__("crc32")))
     #endif
@@ -10993,7 +11027,7 @@ public:
     * @category Windows
     * @implements VM::DISK
     */
-    [[nodiscard]] static bool disk() {
+    [[nodiscard]] static vmaware_technique disk() {
         bool result = false;
 
         /*
@@ -11656,7 +11690,7 @@ public:
      * @category x86 (ARM might have very low thread counts, which is why it should be only for x86)
      * @implements VM::THREAD_COUNT
      */
-    [[nodiscard]] static bool thread_count() {
+    [[nodiscard]] static vmaware_technique thread_count() {
     #if (VMAWARE_X86 && !VMAWARE_APPLE)
         vma_debug("THREAD_COUNT: ", "threads = ", memo::thread_count::fetch());
 
@@ -11685,7 +11719,7 @@ public:
      * @category MacOS
      * @implements VM::HWMODEL
      */
-    [[nodiscard]] static bool hwmodel() {      
+    [[nodiscard]] static vmaware_technique hwmodel() {      
         /* Hw.model strings are short (like for example MacBookPro16,1), 128 bytes is plenty */
         char buffer[128] = { 0 };
         size_t size = sizeof(buffer);
@@ -11726,7 +11760,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::MAC_MEMSIZE
      */
-    [[nodiscard]] static bool hw_memsize() {
+    [[nodiscard]] static vmaware_technique hw_memsize() {
         std::unique_ptr<std::string> result = util::sys_result("sysctl -n hw.memsize");
         const std::string ram = *result;
 
@@ -11757,7 +11791,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::MAC_IOKIT
      */
-    [[nodiscard]] static bool io_kit() {
+    [[nodiscard]] static vmaware_technique io_kit() {
         /* Board_ptr and manufacturer_ptr empty */
         std::unique_ptr<std::string> platform_ptr = util::sys_result("ioreg -rd1 -c IOPlatformExpertDevice");
         std::unique_ptr<std::string> board_ptr = util::sys_result("ioreg -rd1 -c board-id");
@@ -11854,7 +11888,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::IOREG_GREP
      */
-    [[nodiscard]] static bool ioreg_grep() {
+    [[nodiscard]] static vmaware_technique ioreg_grep() {
         auto check_usb = []() -> bool {
             std::unique_ptr<std::string> result = util::sys_result("ioreg -rd1 -c IOUSBHostDevice | grep \"USB Vendor Name\"");
             const std::string usb = *result;
@@ -11894,7 +11928,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::MAC_SIP
      */
-    [[nodiscard]] static bool mac_sip() {
+    [[nodiscard]] static vmaware_technique mac_sip() {
         int hv_present = 0;
         std::size_t size = sizeof(hv_present);
         if (sysctlbyname("kern.hv_vmm_present",
@@ -11938,7 +11972,7 @@ public:
      * @category MacOS
      * @implements VM::MAC_SYS
      */
-    [[nodiscard]] static bool mac_sys() {
+    [[nodiscard]] static vmaware_technique mac_sys() {
         const char* keyword = "virtual machine";
 
         if (std::unique_ptr<std::string> profiler_res_ptr = util::sys_result("system_profiler SPHardwareDataType")) {
@@ -11968,7 +12002,7 @@ public:
      * @category Windows
      * @implements VM::DLL
      */
-    [[nodiscard]] static bool dll() {
+    [[nodiscard]] static vmaware_technique dll() {
         static constexpr struct {
             const wchar_t* dll_name;
             enum brand_enum brand;
@@ -11998,7 +12032,7 @@ public:
      * @category Windows
      * @implements VM::WINE
      */
-    [[nodiscard]] static bool wine() {
+    [[nodiscard]] static vmaware_technique wine() {
         const HMODULE ntdll = memory::get_module(true);
         if (ntdll && GetProcAddress(ntdll, "wine_get_version") != nullptr) {
             vma_debug("WINE: ntdll!wine_get_version detected");
@@ -12063,7 +12097,7 @@ public:
      * @category Windows
      * @implements VM::POWER_CAPABILITIES
      */
-    [[nodiscard]] static bool power_capabilities() {
+    [[nodiscard]] static vmaware_technique power_capabilities() {
         const HMODULE ntdll = memory::get_module(true);
 
         constexpr const char* function_names[] = { "NtPowerInformation" }; /* Win8 // Windows Server 2012 */
@@ -12118,7 +12152,7 @@ public:
      * @category Windows
      * @implements VM::GAMARUE
      */
-    [[nodiscard]] static bool gamarue() {
+    [[nodiscard]] static vmaware_technique gamarue() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -12251,7 +12285,7 @@ public:
      * @category Windows, x86_32
      * @implements VM::VPC_INVALID
      */
-    [[nodiscard]] static bool vpc_invalid() {
+    [[nodiscard]] static vmaware_technique vpc_invalid() {
         bool rc = false;
     #if (VMAWARE_X86_32 && !VMAWARE_CLANG)
         if (util::is_x86_process_on_arm()) {
@@ -12314,7 +12348,10 @@ public:
         }
     #endif
 
-        return rc ? core::add(brand_enum::VPC) : false;
+        if (rc) {
+            return core::add(brand_enum::VPC);
+        }
+        return false;
     }
 
 
@@ -12324,7 +12361,7 @@ public:
      * @category Windows, x86_32
      * @implements VM::VMWARE_STR
      */
-    [[nodiscard]] static bool vmware_str() {
+    [[nodiscard]] static vmaware_technique vmware_str() {
     #if (VMAWARE_X86_32)
         if (util::is_x86_process_on_arm()) {
             return false;
@@ -12357,7 +12394,7 @@ public:
      * @author hfiref0x
      * @implements VM::MUTEX
      */
-    [[nodiscard]] static bool mutex() {
+    [[nodiscard]] static vmaware_technique mutex() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -12448,7 +12485,7 @@ public:
      * @link https://unprotect.it/snippet/checking-specific-folder-name/196/
      * @implements VM::CUCKOO
      */
-    [[nodiscard]] static bool cuckoo() {
+    [[nodiscard]] static vmaware_technique cuckoo() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -12533,7 +12570,7 @@ public:
      * @category Windows
      * @implements VM::DISPLAY
      */
-    [[nodiscard]] static bool display() {
+    [[nodiscard]] static vmaware_technique display() {
         const HDC hdc = GetDC(nullptr);
         if (!hdc) {
             return false;
@@ -12552,7 +12589,7 @@ public:
      * @category Windows
      * @implements VM::DRIVERS
      */
-    [[nodiscard]] static bool drivers() {
+    [[nodiscard]] static vmaware_technique drivers() {
         struct _SYSTEM_MODULE_INFORMATION {
             PVOID  Reserved[2];
             PVOID  ImageBaseAddress;
@@ -12784,7 +12821,7 @@ public:
      * @category Windows
      * @implements VM::GPU_CAPABILITIES
      */
-    [[nodiscard]] static bool gpu_capabilities() {
+    [[nodiscard]] static vmaware_technique gpu_capabilities() {
         /*
             Microsoft::WRL::ComPtr<IDirect3D9> d3d9 {
                 Direct3DCreate9(D3D_SDK_VERSION)
@@ -12824,7 +12861,7 @@ public:
      * @category Windows
      * @implements VM::HANDLES
      */
-    [[nodiscard]] static bool device_handles() {
+    [[nodiscard]] static vmaware_technique device_handles() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -12919,7 +12956,7 @@ public:
      * @category Windows, x86
      * @implements VM::VIRTUAL_PROCESSORS
      */
-    [[nodiscard]] static bool virtual_processors() {
+    [[nodiscard]] static vmaware_technique virtual_processors() {
     #if (VMAWARE_X86)
         int regs[4];
         __cpuid(regs, cpu::leaf::hypervisor);
@@ -12949,7 +12986,7 @@ public:
      * @link https://evasions.checkpoint.com/src/Evasions/techniques/global-os-objects.html
      * @implements VM::VIRTUAL_REGISTRY
      */
-    [[nodiscard]] static bool virtual_registry() {
+    [[nodiscard]] static vmaware_technique virtual_registry() {
         struct custom_unicode_string {
             USHORT Length;
             USHORT MaximumLength;
@@ -13088,7 +13125,10 @@ public:
             mismatch = (_wcsnicmp(object_name->Name.Buffer, raw_target, target_char_count) != 0);
         }
 
-        return mismatch ? core::add(brand_enum::SANDBOXIE) : false;
+        if (mismatch) {
+            return core::add(brand_enum::SANDBOXIE);
+        }
+        return false;
     }
     
     
@@ -13097,7 +13137,7 @@ public:
      * @category Windows
      * @implements VM::ACPI_SIGNATURE
      */
-    [[nodiscard]] static bool acpi_signature() {
+    [[nodiscard]] static vmaware_technique acpi_signature() {
         /* Enumerate all devices */
         const HDEVINFO handle_dev_info = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
         if (handle_dev_info == INVALID_HANDLE_VALUE) {
@@ -13228,7 +13268,7 @@ public:
      * @category Windows, x86_64
      * @implements VM::TRAP
      */
-    [[nodiscard]] static bool trap() {
+    [[nodiscard]] static vmaware_technique trap() {
         if (util::is_x86_process_on_arm()) {
             return false;
         }
@@ -13394,7 +13434,7 @@ public:
      * @category Windows
      * @implements VM::UD
      */
-    [[nodiscard]] static bool ud() {
+    [[nodiscard]] static vmaware_technique ud() {
     #if (VMAWARE_X86) || (VMAWARE_ARM32) || (VMAWARE_ARM64)
         bool saw_ud = false;
 
@@ -13417,7 +13457,7 @@ public:
      * @category Windows
      * @implements VM::INTERRUPT_SHADOW
      */
-    [[nodiscard]] static bool interrupt_shadow() {
+    [[nodiscard]] static vmaware_technique interrupt_shadow() {
     #if (VMAWARE_X86)
         if (util::hyper_x() == HYPERV_HOST) {
             return false;
@@ -13607,7 +13647,7 @@ public:
      * @category Windows
      * @implements VM::DBVM
      */
-    [[nodiscard]] static bool dbvm() {
+    [[nodiscard]] static vmaware_technique dbvm() {
     #if (!VMAWARE_X86_64)
         return false;
     #else
@@ -13779,7 +13819,7 @@ public:
      * @category Windows
      * @implements VM::KERNEL_OBJECTS
      */
-    [[nodiscard]] static bool kernel_objects() {
+    [[nodiscard]] static vmaware_technique kernel_objects() {
         struct OBJECT_DIRECTORY_INFORMATION {
             UNICODE_STRING Name;
             UNICODE_STRING TypeName;
@@ -13934,7 +13974,10 @@ public:
         }
 
         nt_close(dir);
-        return detected ? core::add(detected_brand) : false;
+        if (detected) {
+            return core::add(detected_brand);
+        }
+        return false;
     }
 
 
@@ -13944,7 +13987,7 @@ public:
      * @warning Permissions required
      * @implements VM::NVRAM
      */
-    static bool nvram() {
+    [[nodiscard]] static vmaware_technique nvram() {
         if (!util::is_admin()) {
             return false;
         }
@@ -14344,7 +14387,7 @@ public:
      * @category Windows, x86
      * @implements VM::CPU_HEURISTIC
      */
-    [[nodiscard]] static bool cpu_heuristic() {
+    [[nodiscard]] static vmaware_technique cpu_heuristic() {
         bool spoofed = false;
     #if (VMAWARE_X86)
         if (util::is_x86_process_on_arm()) {
@@ -14927,7 +14970,7 @@ public:
      * @category Windows, x86
      * @implements VM::MSR
      */
-    [[nodiscard]] static bool msr() {
+    [[nodiscard]] static vmaware_technique msr() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -15133,7 +15176,7 @@ public:
      * @category Windows, x86
      * @implements VM::KVM_INTERCEPTION
      */
-    [[nodiscard]] static bool kvm_interception() {
+    [[nodiscard]] static vmaware_technique kvm_interception() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -15173,7 +15216,7 @@ public:
      * @author @NickEverdox (https://github.com/everdox) - ERMSB check
      * @implements VM::HYPERVISOR_HOOK
      */
-    [[nodiscard]] static bool hypervisor_hook() {
+    [[nodiscard]] static vmaware_technique hypervisor_hook() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -15616,7 +15659,7 @@ public:
      * @category Windows, x86
      * @implements VM::SINGLE_STEP
      */
-    [[nodiscard]] static bool single_step() {
+    [[nodiscard]] static vmaware_technique single_step() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -15713,7 +15756,7 @@ public:
      * @author Idea by @NickEverdox (https://github.com/everdox)
      * @implements VM::EIP_OVERFLOW
      */
-    [[nodiscard]] static bool eip_overflow() {
+    [[nodiscard]] static vmaware_technique eip_overflow() {
     #if (!VMAWARE_X86_64) 
         /*
          * This requires mapping executable memory at the end of the 4GB address space (0xFFFF0000) so an instruction can wrap the 32 bit boundary
@@ -15908,7 +15951,7 @@ public:
      * @category Windows, x86
      * @implements VM::SVM_EXCEPTIONS
      */
-    [[nodiscard]] static bool svm_exceptions() {
+    [[nodiscard]] static vmaware_technique svm_exceptions() {
     #if (VMAWARE_X86)   
         if (!cpu::is_amd()) {
             vma_debug("SVM_EXCEPTIONS: AMD CPU not detected");
@@ -15965,7 +16008,7 @@ public:
      * @category Windows
      * @implements VM::MEASURED_BOOT
      */
-    [[nodiscard]] static bool measured_boot() {
+    [[nodiscard]] static vmaware_technique measured_boot() {
         using TBS_RESULT = UINT32;
         using TBS_HCONTEXT = void*;
 
@@ -16260,7 +16303,7 @@ public:
      * @category Windows
      * @implements VM::TPM
      */
-    [[nodiscard]] static bool tpm() {
+    [[nodiscard]] static vmaware_technique tpm() {
     #pragma pack(push, 1)
         struct tcg_pcr_event_header {
             u32 pcr_index;
@@ -17012,7 +17055,7 @@ public:
      * @category Windows
      * @implements VM::VCPU_SCHEDULING
      */
-    [[nodiscard]] static bool vcpu_scheduling() {
+    [[nodiscard]] static vmaware_technique vcpu_scheduling() {
         /* Local descriptor representing a physical processor and its logical mask */
         struct physical_processor_entry {
             u32 physical_id;
@@ -17137,7 +17180,7 @@ public:
      * @category Windows, Linux, Apple
      * @implements VM::EMULATION
      */
-    [[nodiscard]] static bool emulation() noexcept {
+    [[nodiscard]] static vmaware_technique emulation() noexcept {
     #if (VMAWARE_X86)
         if (util::is_x86_process_on_arm()) {
             return false;
@@ -17368,96 +17411,55 @@ public:
     #pragma endregion
 #endif
 
-    /* ============================================================================================== *
-     *                                                                                                *                                                                                               *
-     *                                        CORE SECTION                                            *
-     *                                                                                                *
-     * ============================================================================================== */
     struct core {
         struct technique {
-            u8 points = 0; /* This is the certainty score between 0 and 100 */
-            bool(*run)();  /* This is the technique function itself */
+            const char* name;
+            u8 points;
+            vmaware_technique(*run)();
 
-            constexpr technique() noexcept : run(nullptr) {}
-            constexpr technique(u8 points, bool(*run)()) noexcept : points(points), run(run) {}
+            constexpr technique() noexcept
+                : name(""), points(0), run(nullptr) {
+            }
+
+            constexpr technique(const char* name, u8 points, vmaware_technique(*run)()) noexcept
+                : name(name), points(points), run(run) {
+            }
         };
 
-        struct custom_technique { /* For custom techniques the user can implement */
+        struct custom_technique {
             u8 points;
             u16 id;
-            bool(*run)();
+            bool (*run)(); /* So that user-defined custom techniques don't need to know about internal result_t structures */
         };
 
-        /* Entry for the initialization list */
         struct technique_entry {
             enum_flags id;
             technique tech;
         };
 
-        /* Entry for brand scoreboard */
         struct brand_entry {
             brand_enum name;
             brand_score_t score;
         };
 
-        /*
-         * The actual table, which is derived from the list above and will be
-         * used for most functionalities related to technique interactions
-         */
         static std::array<technique, enum_size + 1> technique_table;
-
-        static std::vector<VM::core::custom_technique> custom_table; /* Users should not have a limit of how many functions they should add, this is the only exception of a heap-allocated object in our core */
+        static std::vector<VM::core::custom_technique> custom_table;
         static size_t custom_table_size;
-
         static std::array<brand_entry, MAX_BRANDS> brand_scoreboard;
 
-        /* Temporary storage to capture which brand was detected by the currently running technique. */
-        static brand_enum last_detected_brand;
-        static u8 last_detected_score;
-
-        /* 1. One brand, custom score */
-        static bool add(const brand_enum p_brand, const u8 score) noexcept {
-            return add_score(p_brand, brand_enum::NULL_BRAND, score);
+        static constexpr vmaware_technique add(const brand_enum p_brand, const u8 score = 0) noexcept {
+            return vmaware_technique(true, p_brand, score);
         }
 
-        /* 2. One brand, default score */
-        static bool add(const brand_enum p_brand) noexcept {
-            return add_score(p_brand, brand_enum::NULL_BRAND, 0);
+        static constexpr vmaware_technique add(const brand_enum p_brand, const brand_enum extra_brand) noexcept {
+            return vmaware_technique(true, p_brand, extra_brand, 0);
         }
 
-        /* 3. Two brands, default score */
-        static bool add(const brand_enum p_brand, const brand_enum extra_brand) noexcept {
-            return add_score(p_brand, extra_brand, 0);
+        static constexpr vmaware_technique add_score(const brand_enum p_brand, const brand_enum extra_brand, const u8 score) noexcept {
+            return vmaware_technique(true, p_brand, extra_brand, score);
         }
 
-        static bool add_score(const brand_enum p_brand, const brand_enum extra_brand, const u8 score) noexcept {
-            if (p_brand != brand_enum::NULL_BRAND) {
-                last_detected_brand = p_brand;
-            }
-            else if (extra_brand != brand_enum::NULL_BRAND) {
-                last_detected_brand = extra_brand;
-            }
-
-            if (score > 0) {
-                last_detected_score = score; /* Store for the engine to read */
-            }
-
-            constexpr size_t max_brands = sizeof(brand_scoreboard) / sizeof(brand_scoreboard[0]);
-
-            const u8 p_idx = static_cast<u8>(p_brand);
-            if (VMAWARE_LIKELY(p_idx < max_brands && p_brand != brand_enum::NULL_BRAND)) {
-                brand_scoreboard[p_idx].score++;
-            }
-
-            const u8 e_idx = static_cast<u8>(extra_brand);
-            if (extra_brand != brand_enum::NULL_BRAND && e_idx < max_brands) {
-                brand_scoreboard[e_idx].score++;
-            }
-
-            return true;
-        }
-
-        /* Assert if the flag is disabled, far better expression than typing std::bitset member functions */
+        /* Assert if the flag is disabled */
         [[nodiscard]] static constexpr bool is_disabled(const flagset& flags, const u8 flag_bit) noexcept {
             return flag_bit >= flags.size() || !flags.test(flag_bit);
         }
@@ -17476,7 +17478,6 @@ public:
                 }
                 return m;
             }();
-
             return mask;
         }
 
@@ -17489,7 +17490,6 @@ public:
                 }
                 return m;
             }();
-
             return mask;
         }
 
@@ -17501,12 +17501,10 @@ public:
             return (flags & get_settings_mask()).any();
         }
 
-        /* Run every VM detection mechanism in the technique table */
         static u16 run_all(const flagset& flags, const bool shortcut = false) noexcept {
             u16 points = 0;
             detected_count_num = 0;
 
-            /* Reset scoreboard at the start of a run to prevent score leakage */
             for (size_t i = 0; i < MAX_BRANDS; ++i) {
                 brand_scoreboard[i].score = 0;
                 brand_scoreboard[i].name = static_cast<brand_enum>(i);
@@ -17514,164 +17512,83 @@ public:
 
             const u16 threshold_points = core::is_enabled(flags, HIGH_THRESHOLD) ? high_threshold_score : threshold_score;
 
-            const size_t tech_limit = technique_table.size(); /* (enum_size + 1) */
-            for (size_t i = technique_begin; i < technique_end; ++i) {
-                VMAWARE_ASSUME(i < tech_limit);
-
-                const enum_flags technique_macro = static_cast<enum_flags>(i);
-                const technique& technique_data = technique_table[i];
-
-                /* Skip empty entries */
-                if (!technique_data.run) {
-                    continue;
+            auto dispatch_check = [&](u16 id, const technique& tech) -> bool {
+                if (!tech.run || core::is_disabled(flags, static_cast<u8>(id))) {
+                    return false;
                 }
 
-                /* Check if the technique is disabled */
-                if (core::is_disabled(flags, technique_macro)) {
-                    continue;
-                }
-
-                /* Check if the technique is cached already */
-                if (memo::is_cached(technique_macro)) {
-                    const memo::data_t data = memo::cache_fetch(technique_macro);
-
+                if (memo::is_cached(id)) {
+                    const memo::data_t data = memo::cache_fetch(id);
                     if (data.result) {
                         points += data.points;
                         detected_count_num++;
-
                         if (data.brand_name != brand_enum::NULL_BRAND) {
-                            add(data.brand_name);
+                            brand_scoreboard[static_cast<size_t>(data.brand_name)].score++;
                         }
                     }
-
-                    /*
-                     * For things like VM::detect() and VM::percentage(),
-                     * a score of 150+ is guaranteed to be a VM, so
-                     * there's no point in running the rest of the techniques
-                     * (unless the threshold is set to be higher, but it's the
-                     * same story here nonetheless, except the threshold is 300)
-                     */
-                    if (shortcut && (points >= threshold_points)) {
-                        return points;
-                    }
-
-                    continue;
+                    return shortcut && (points >= threshold_points);
                 }
 
-                /* Reset the last detected brand before running */
-                last_detected_brand = brand_enum::NULL_BRAND;
-                last_detected_score = 0;
+                const vmaware_technique res = tech.run();
 
-                /* Snapshot scoreboard to prevent score leakage if technique returns false */
-                const auto scoreboard_snapshot = brand_scoreboard;
-
-                /* Run the technique */
-                const bool result = technique_data.run();
-
-                if (result) {
-                    /* Determine which points to use: Override or Default */
-                    const u8 points_to_add = (last_detected_score > 0) ? last_detected_score : technique_data.points;
-
-                    points += points_to_add;
-                    /*
-                     * This is specific to VM::detected_count() which
-                     * returns the number of techniques that found a VM.
-                     */
+                if (res.detected) {
+                    const u8 pts = (res.score > 0) ? res.score : tech.points;
+                    points += pts;
                     detected_count_num++;
 
-                    /* Retrieve the brand that was set during execution (if any) */
-                    const enum brand_enum detected_brand = last_detected_brand;
-                    /* Store the current technique result to the cache */
-                    memo::cache_store(technique_macro, result, points_to_add, detected_brand);
+                    if (res.brand != brand_enum::NULL_BRAND) {
+                        brand_scoreboard[static_cast<size_t>(res.brand)].score++;
+                    }
+                    if (res.extra_brand != brand_enum::NULL_BRAND) {
+                        brand_scoreboard[static_cast<size_t>(res.extra_brand)].score++;
+                    }
+                    memo::cache_store(id, true, pts, res.brand);
                 }
                 else {
-                    brand_scoreboard = scoreboard_snapshot;
-                    last_detected_brand = brand_enum::NULL_BRAND;
-                    last_detected_score = 0;
-                    memo::cache_store(technique_macro, false, 0);
+                    memo::cache_store(id, false, 0, brand_enum::NULL_BRAND);
                 }
 
-                /*
-                 * For things like VM::detect() and VM::percentage(),
-                 * a score of 150+ is guaranteed to be a VM, so
-                 * there's no point in running the rest of the techniques
-                 * (unless the threshold is set to be higher, but it's the
-                 * same story here nonetheless, except the threshold is 300)
-                 */
-                if (shortcut && (points >= threshold_points)) {
+                return shortcut && (points >= threshold_points);
+            };
+
+            /* 1. Built-in techniques loop */
+            for (size_t i = technique_begin; i < technique_end; ++i) {
+                if (dispatch_check(static_cast<u16>(i), technique_table[i])) {
                     return points;
                 }
             }
 
-            /* For custom VM techniques, won't be used most of the time */
-            if (VMAWARE_UNLIKELY(!core::custom_table.empty())) {
-                for (const auto& technique : core::custom_table) {
-                    if (shortcut && (points >= threshold_points)) {
-                        return points;
-                    }
+            /* 2. Custom techniques loop */
+            for (const auto& custom : core::custom_table) {
+                if (!custom.run) {
+                    continue;
+                }
 
-                    /* Skip empty entries */
-                    if (!technique.run) {
-                        continue;
-                    }
-
-                    /* If cached, return that result */
-                    if (memo::is_cached(technique.id)) {
-                        const memo::data_t data = memo::cache_fetch(technique.id);
-
-                        if (data.result) {
-                            points += data.points;
-                            detected_count_num++;
-
-                            if (data.brand_name != brand_enum::NULL_BRAND) {
-                                add(data.brand_name);
-                            }
-                        }
-
-                        if (shortcut && (points >= threshold_points)) {
-                            return points;
-                        }
-
-                        continue;
-                    }
-
-                    /* Reset the last detected brand before running */
-                    last_detected_brand = brand_enum::NULL_BRAND;
-                    last_detected_score = 0;
-
-                    const auto scoreboard_snapshot = brand_scoreboard;
-
-                    /* Run the custom technique */
-                    const bool result = technique.run();
-
-                    /* Accumulate a few important values */
-                    if (result) {
-                        const u8 points_to_add = (last_detected_score > 0) ? last_detected_score : technique.points;
-
-                        points += points_to_add;
+                if (memo::is_cached(custom.id)) {
+                    const memo::data_t data = memo::cache_fetch(custom.id);
+                    if (data.result) {
+                        points += data.points;
                         detected_count_num++;
-
-                        /* Retrieve the brand that was set during execution (if any) */
-                        const enum brand_enum detected_brand = last_detected_brand;
-
-                        /* Cache the result */
-                        memo::cache_store(
-                            technique.id,
-                            result,
-                            points_to_add,
-                            detected_brand
-                        );
                     }
-                    else {
-                        brand_scoreboard = scoreboard_snapshot;
-                        last_detected_brand = brand_enum::NULL_BRAND;
-                        last_detected_score = 0;
-                        memo::cache_store(technique.id, false, 0);
-                    }
-
                     if (shortcut && (points >= threshold_points)) {
                         return points;
                     }
+                    continue;
+                }
+
+                /* Run user custom technique */
+                const bool res = custom.run();
+                if (res) {
+                    points += custom.points;
+                    detected_count_num++;
+                    memo::cache_store(custom.id, true, custom.points, brand_enum::NULL_BRAND);
+                }
+                else {
+                    memo::cache_store(custom.id, false, 0, brand_enum::NULL_BRAND);
+                }
+
+                if (shortcut && (points >= threshold_points)) {
+                    return points;
                 }
             }
 
@@ -17681,7 +17598,7 @@ public:
         static flagset flag_collector;
         static flagset disabled_flag_collector;
 
-        /* Alternative settings method */
+        /* Settings management */
         struct settings {
             flagset flag_collector = generate_default();
 
@@ -17720,7 +17637,6 @@ public:
                 flagset f;
                 f.set();
 
-                /* Disable all disabled techniques */
                 for (const auto id : disabled_techniques) {
                     const auto idx = static_cast<size_t>(id);
                     if (idx < f.size()) {
@@ -17728,7 +17644,6 @@ public:
                     }
                 }
 
-                /* Disable all the settings flags except for VM::DEFAULT */
                 f.reset(EXPERIMENTAL);
                 f.reset(HIGH_THRESHOLD);
                 f.reset(NULL_ARG);
@@ -17791,20 +17706,17 @@ public:
             }
         }
 
-        /* SFINAE base case for compile-time validation of zero arguments */
         template <typename... Args>
         static constexpr typename std::enable_if<sizeof...(Args) == 0, bool>::type
             verify_flags() noexcept {
             return true;
         }
 
-        /* Recursive compile-time validation for 1 or more arguments */
         template <typename T, typename... Args>
         static constexpr bool verify_flags() noexcept {
             return std::is_same<typename std::decay<T>::type, enum_flags>::value&& verify_flags<Args...>();
         }
 
-        /* Overload for zero arguments to prevent C4127 constant conditional warning */
         static flagset arg_handler() noexcept {
             flagset collector;
             generate_default(collector);
@@ -17813,7 +17725,6 @@ public:
             return collector;
         }
 
-        /* Terminates recursion when all variadic arguments have been processed */
         template <typename flagset_type>
         static inline void populate_flagset(flagset_type&) noexcept {}
 
@@ -17823,7 +17734,6 @@ public:
             populate_flagset(collector, tail...);
         }
 
-        /* Overload for 1 or more arguments */
         template <typename T, typename... Args>
         static VMAWARE_CONSTEXPR flagset arg_handler(T first, Args... args) {
             static_assert(verify_flags<T, Args...>(), "argument handler only accepts enum_flags variables");
@@ -17856,7 +17766,6 @@ public:
             return collector;
         }
 
-        /* Same as above but for VM::disable which only accepts technique flags */
         template <typename... Args>
         static void disabled_arg_handler(Args... args) {
             static_assert(verify_flags<Args...>(), "disabled argument handler only accepts enum_flags variables");
@@ -17868,7 +17777,6 @@ public:
                 0, (temp.set(static_cast<size_t>(args), true), 0)...
             };
 
-            /* Check if a settings flag is set, which is not valid */
             if (core::is_setting_flag_set(temp)) {
                 throw std::invalid_argument("VM::DISABLE() must not contain a settings flag, they are disabled by default anyway");
             }
@@ -17941,18 +17849,15 @@ public:
         const core::technique& pair = core::technique_table.at(flag_bit);
 
         if (auto run_fn = pair.run) {
-            core::last_detected_brand = brand_enum::NULL_BRAND;
-            core::last_detected_score = 0;
+            const vmaware_technique res = run_fn();
+            const u8 points_to_add = (res.score > 0) ? res.score : pair.points;
 
-            const bool result = run_fn();
-            const u8 points_to_add = (core::last_detected_score > 0) ? core::last_detected_score : pair.points;
-
-            if (result) {
+            if (res.detected) {
                 detected_count_num++;
             }
 
-            memo::cache_store(flag_bit, result, result ? points_to_add : 0, core::last_detected_brand);
-            return result;
+            memo::cache_store(flag_bit, res.detected, res.detected ? points_to_add : 0, res.brand);
+            return res.detected;
         }
 
         throw_error("Flag is not known or not implemented");
@@ -18155,97 +18060,17 @@ public:
      * @param single technique flag in VM structure
      */
     [[nodiscard]] static std::string flag_to_string(const enum_flags flag) {
+        if (static_cast<u8>(flag) < static_cast<u8>(technique_end) && core::technique_table[flag].name != nullptr && core::technique_table[flag].name[0] != '\0') {
+            return std::string(core::technique_table[flag].name);
+        }
         switch (flag) {
-            // START OF TECHNIQUE LIST
-            case VMID: return "VMID";
-            case CPU_BRAND: return "CPU_BRAND";
-            case HYPERVISOR_BIT: return "HYPERVISOR_BIT";
-            case HYPERVISOR_STR: return "HYPERVISOR_STR";
-            case TIMER: return "TIMER";
-            case THREAD_COUNT: return "THREAD_COUNT";
-            case MAC: return "MAC";
-            case TEMPERATURE: return "TEMPERATURE";
-            case SYSTEMD: return "SYSTEMD";
-            case CVENDOR: return "CVENDOR";
-            case CTYPE: return "CTYPE";
-            case DOCKERENV: return "DOCKERENV";
-            case DMIDECODE: return "DMIDECODE";
-            case DMESG: return "DMESG";
-            case HWMON: return "HWMON";
-            case DLL: return "DLL";
-            case HWMODEL: return "HWMODEL";
-            case WINE: return "WINE";
-            case POWER_CAPABILITIES: return "POWER_CAPABILITIES";
-            case PROCESSES: return "PROCESSES";
-            case LINUX_USER_HOST: return "LINUX_USER_HOST";
-            case GAMARUE: return "GAMARUE";
-            case BOCHS_CPU: return "BOCHS_CPU";
-            case MAC_MEMSIZE: return "MAC_MEMSIZE";
-            case MAC_IOKIT: return "MAC_IOKIT";
-            case IOREG_GREP: return "IOREG_GREP";
-            case MAC_SIP: return "MAC_SIP";
-            case VPC_INVALID: return "VPC_INVALID";
-            case SYSTEM_REGISTERS: return "SYSTEM_REGISTERS";
-            case VMWARE_STR: return "VMWARE_STR";
-            case MUTEX: return "MUTEX";
-            case THREAD_MISMATCH: return "THREAD_MISMATCH";
-            case CUCKOO: return "CUCKOO";
-            case AZURE: return "AZURE";
-            case DISPLAY: return "DISPLAY";
-            case BLUESTACKS_FOLDERS: return "BLUESTACKS_FOLDERS";
-            case CPUID_SIGNATURE: return "CPUID_SIGNATURE";
-            case KGT_SIGNATURE: return "KGT_SIGNATURE";
-            case QEMU_VIRTUAL_DMI: return "QEMU_VIRTUAL_DMI";
-            case QEMU_USB: return "QEMU_USB";
-            case HYPERVISOR_DIR: return "HYPERVISOR_DIR";
-            case UML_CPU: return "UML_CPU";
-            case KMSG: return "KMSG";
-            case VBOX_MODULE: return "VBOX_MODULE";
-            case SYSINFO_PROC: return "SYSINFO_PROC";
-            case DMI_SCAN: return "DMI_SCAN";
-            case SMBIOS_VM_BIT: return "SMBIOS_VM_BIT";
-            case PODMAN_FILE: return "PODMAN_FILE";
-            case WSL_PROC: return "WSL_PROC";
-            case DRIVERS: return "DRIVERS";
-            case DISK: return "DISK";
-            case GPU_CAPABILITIES: return "GPU_CAPABILITIES";
-            case HANDLES: return "HANDLES";
-            case QEMU_FW_CFG: return "QEMU_FW_CFG";
-            case VIRTUAL_PROCESSORS: return "VIRTUAL_PROCESSORS";
-            case AMD_SEV_MSR: return "AMD_SEV_MSR";
-            case VIRTUAL_REGISTRY: return "VIRTUAL_REGISTRY";
-            case FIRMWARE: return "FIRMWARE";
-            case CONTAINER_PID: return "CONTAINER_PID";
-            case DEVICES: return "DEVICES";
-            case ACPI_SIGNATURE: return "ACPI_SIGNATURE";
-            case TRAP: return "TRAP";
-            case UD: return "UD";
-            case INTERRUPT_SHADOW: return "INTERRUPT_SHADOW";
-            case DBVM: return "DBVM";
-            case BOOT_LOGO: return "BOOT_LOGO";
-            case MAC_SYS: return "MAC_SYS";
-            case KERNEL_OBJECTS: return "KERNEL_OBJECTS";
-            case NVRAM: return "NVRAM";
-            case CPU_HEURISTIC: return "CPU_HEURISTIC";
-            case MSR: return "MSR";
-            case KVM_INTERCEPTION: return "KVM_INTERCEPTION";
-            case HYPERVISOR_HOOK: return "HYPERVISOR_HOOK";
-            case SINGLE_STEP: return "SINGLE_STEP";
-            case EIP_OVERFLOW: return "EIP_OVERFLOW";
-            case SVM_EXCEPTIONS: return "SVM_EXCEPTIONS";
-            case CGROUP: return "CGROUP";
-            case MEASURED_BOOT: return "MEASURED_BOOT";
-            case TPM: return "TPM";
-            case VCPU_SCHEDULING: return "VCPU_SCHEDULING";
-            case EMULATION: return "EMULATION";
-            /* END OF TECHNIQUE LIST */
-            case DEFAULT: return "DEFAULT"; 
-            case ALL: return "ALL"; 
-            case NULL_ARG: return "NULL_ARG"; 
-            case HIGH_THRESHOLD: return "HIGH_THRESHOLD"; 
-            case DYNAMIC: return "DYNAMIC"; 
-            case MULTIPLE: return "MULTIPLE"; 
-            default: return "Unknown flag";
+            case DEFAULT:        return "DEFAULT";
+            case ALL:            return "ALL";
+            case NULL_ARG:       return "NULL_ARG";
+            case HIGH_THRESHOLD: return "HIGH_THRESHOLD";
+            case DYNAMIC:        return "DYNAMIC";
+            case MULTIPLE:       return "MULTIPLE";
+            default:             return "Unknown flag";
         }
     }
 
@@ -18625,9 +18450,6 @@ bool VM::memo::cpu_brand::cached = false;
 bool VM::memo::hyperx::cached = false;
 bool VM::memo::brand_list::cached = false;
 
-enum VM::brand_enum VM::core::last_detected_brand = VM::brand_enum::NULL_BRAND;
-VM::u8 VM::core::last_detected_score = 0;
-
 /*
  * These are basically the base values for the core::arg_handler function.
  * It's like a bucket that will collect all the bits enabled. If for example
@@ -18657,104 +18479,102 @@ std::array<VM::core::technique, VM::enum_size + 1> VM::core::technique_table = [
     std::array<VM::core::technique, VM::enum_size + 1> table{};
     /* FORMAT: { VM::<ID>, { certainty%, function pointer } }, */
     const VM::core::technique_entry entries[] = {
-        // START OF TECHNIQUE TABLE
         #if (VMAWARE_WINDOWS)
-            {VM::TRAP, {150, VM::trap}},
-            {VM::KVM_INTERCEPTION, {150, VM::kvm_interception}},
-            {VM::SVM_EXCEPTIONS, {35, VM::svm_exceptions}},
-            {VM::MEASURED_BOOT, {150, VM::measured_boot}},
-            {VM::INTERRUPT_SHADOW, {150, VM::interrupt_shadow}},
-            {VM::EIP_OVERFLOW, {150, VM::eip_overflow}},
-            {VM::HYPERVISOR_HOOK, {150, VM::hypervisor_hook}},
-            {VM::SINGLE_STEP, {150, VM::single_step}},
-            {VM::TPM, {45, VM::tpm}},
-            {VM::VCPU_SCHEDULING, {100, VM::vcpu_scheduling}},
-            {VM::NVRAM, {100, VM::nvram}},
-            {VM::CPU_HEURISTIC, {90, VM::cpu_heuristic}},
-            {VM::ACPI_SIGNATURE, {100, VM::acpi_signature}},
-            {VM::POWER_CAPABILITIES, {25, VM::power_capabilities}},
-            {VM::GPU_CAPABILITIES, {20, VM::gpu_capabilities}},
-            {VM::MSR, {100, VM::msr}},
-            {VM::VIRTUAL_PROCESSORS, {100, VM::virtual_processors}},
-            {VM::WINE, {150, VM::wine}},
-            {VM::DBVM, {150, VM::dbvm}},
-            {VM::UD, {100, VM::ud}},
-            {VM::DRIVERS, {100, VM::drivers}},
-            {VM::HANDLES, {100, VM::device_handles}},
-            {VM::KERNEL_OBJECTS, {100, VM::kernel_objects}},
-            {VM::EMULATION, {100, VM::emulation}},
-            {VM::DLL, {50, VM::dll}},
-            {VM::DISPLAY, {25, VM::display}},
-            {VM::VIRTUAL_REGISTRY, {100, VM::virtual_registry}},
-            {VM::MUTEX, {100, VM::mutex}},
-            {VM::VPC_INVALID, {75, VM::vpc_invalid}},
-            {VM::VMWARE_STR, {35, VM::vmware_str}},
-            {VM::GAMARUE, {30, VM::gamarue}},
-            {VM::CUCKOO, {30, VM::cuckoo}},
+            { VM::TRAP,{ "TRAP",                150, VM::trap } },
+            { VM::KVM_INTERCEPTION,{ "KVM_INTERCEPTION",    150, VM::kvm_interception } },
+            { VM::SVM_EXCEPTIONS,{ "SVM_EXCEPTIONS",       35, VM::svm_exceptions } },
+            { VM::MEASURED_BOOT,{ "MEASURED_BOOT",       150, VM::measured_boot } },
+            { VM::INTERRUPT_SHADOW,{ "INTERRUPT_SHADOW",    150, VM::interrupt_shadow } },
+            { VM::EIP_OVERFLOW,{ "EIP_OVERFLOW",        150, VM::eip_overflow } },
+            { VM::HYPERVISOR_HOOK,{ "HYPERVISOR_HOOK",     150, VM::hypervisor_hook } },
+            { VM::SINGLE_STEP,{ "SINGLE_STEP",         150, VM::single_step } },
+            { VM::TPM,{ "TPM",                  45, VM::tpm } },
+            { VM::VCPU_SCHEDULING,{ "VCPU_SCHEDULING",     100, VM::vcpu_scheduling } },
+            { VM::NVRAM, { "NVRAM",               100, VM::nvram } },
+            { VM::CPU_HEURISTIC,{ "CPU_HEURISTIC",        90, VM::cpu_heuristic } },
+            { VM::ACPI_SIGNATURE,{ "ACPI_SIGNATURE",      100, VM::acpi_signature } },
+            { VM::POWER_CAPABILITIES,{ "POWER_CAPABILITIES",   25, VM::power_capabilities } },
+            { VM::GPU_CAPABILITIES,{ "GPU_CAPABILITIES",     20, VM::gpu_capabilities } },
+            { VM::MSR,{ "MSR",                 100, VM::msr } },
+            { VM::VIRTUAL_PROCESSORS,{ "VIRTUAL_PROCESSORS",  100, VM::virtual_processors } },
+            { VM::WINE,{ "WINE",                150, VM::wine } },
+            { VM::DBVM,{ "DBVM",                150, VM::dbvm } },
+            { VM::UD,{ "UD",                  100, VM::ud } },
+            { VM::DRIVERS,{ "DRIVERS",             100, VM::drivers } },
+            { VM::HANDLES,{ "HANDLES",             100, VM::device_handles } },
+            { VM::KERNEL_OBJECTS,{ "KERNEL_OBJECTS",      100, VM::kernel_objects } },
+            { VM::EMULATION,{ "EMULATION",           100, VM::emulation } },
+            { VM::DLL,{ "DLL",                  50, VM::dll } },
+            { VM::DISPLAY,{ "DISPLAY",              25, VM::display } },
+            { VM::VIRTUAL_REGISTRY,{ "VIRTUAL_REGISTRY",    100, VM::virtual_registry } },
+            { VM::MUTEX,{ "MUTEX",               100, VM::mutex } },
+            { VM::VPC_INVALID,{ "VPC_INVALID",          75, VM::vpc_invalid } },
+            { VM::VMWARE_STR,{ "VMWARE_STR",           35, VM::vmware_str } },
+            { VM::GAMARUE,{ "GAMARUE",              30, VM::gamarue } },
+            { VM::CUCKOO,{ "CUCKOO",               30, VM::cuckoo } },
         #endif
 
         #if (VMAWARE_LINUX || VMAWARE_WINDOWS)
-            {VM::FIRMWARE, {100, VM::firmware}},
-            {VM::DEVICES, {95, VM::devices}},
-            {VM::SYSTEM_REGISTERS, {50, VM::system_registers}},
-            {VM::AZURE, {30, VM::azure}},
-            {VM::BOOT_LOGO, {90, VM::boot_logo}},
-            {VM::DISK, {150, VM::disk}},
+            { VM::FIRMWARE,{ "FIRMWARE",            100, VM::firmware } },
+            { VM::DEVICES,{ "DEVICES",              95, VM::devices } },
+            { VM::SYSTEM_REGISTERS,{ "SYSTEM_REGISTERS",     50, VM::system_registers } },
+            { VM::AZURE,{ "AZURE",                30, VM::azure } },
+            { VM::BOOT_LOGO,{ "BOOT_LOGO",            90, VM::boot_logo } },
+            { VM::DISK,{ "DISK",                150, VM::disk } },
         #endif
 
         #if (VMAWARE_LINUX)
-            {VM::SMBIOS_VM_BIT, {50, VM::smbios_vm_bit}},
-            {VM::KMSG, {5, VM::kmsg}},
-            {VM::CVENDOR, {65, VM::chassis_vendor}},
-            {VM::QEMU_FW_CFG, {70, VM::qemu_fw_cfg}},
-            {VM::SYSTEMD, {35, VM::systemd_virt}},
-            {VM::CTYPE, {20, VM::chassis_type}},
-            {VM::DOCKERENV, {100, VM::dockerenv}},
-            {VM::DMIDECODE, {55, VM::dmidecode}},
-            {VM::DMESG, {55, VM::dmesg}},
-            {VM::HWMON, {35, VM::hwmon}},
-            {VM::LINUX_USER_HOST, {10, VM::linux_user_host}},
-            {VM::QEMU_VIRTUAL_DMI, {40, VM::qemu_virtual_dmi}},
-            {VM::QEMU_USB, {20, VM::qemu_usb}},
-            {VM::HYPERVISOR_DIR, {20, VM::hypervisor_dir}},
-            {VM::UML_CPU, {80, VM::uml_cpu}},
-            {VM::VBOX_MODULE, {15, VM::vbox_module}},
-            {VM::SYSINFO_PROC, {15, VM::sysinfo_proc}},
-            {VM::DMI_SCAN, {50, VM::dmi_scan}},
-            {VM::PODMAN_FILE, {5, VM::podman_file}},
-            {VM::WSL_PROC, {30, VM::wsl_proc_subdir}},
-            {VM::MAC, {20, VM::mac_address_check}},
-            {VM::CONTAINER_PID, {75, VM::container_proc_id}},
-            {VM::BLUESTACKS_FOLDERS, {5, VM::bluestacks}},
-            {VM::AMD_SEV_MSR, {50, VM::amd_sev_msr}},
-            {VM::TEMPERATURE, {20, VM::temperature}},
-            {VM::CGROUP, {70, VM::cgroup}},
-            {VM::PROCESSES, {40, VM::processes}},
+            { VM::SMBIOS_VM_BIT,{ "SMBIOS_VM_BIT",        50, VM::smbios_vm_bit } },
+            { VM::KMSG,{ "KMSG",                  5, VM::kmsg } },
+            { VM::CVENDOR,{ "CVENDOR",              65, VM::chassis_vendor } },
+            { VM::QEMU_FW_CFG,{ "QEMU_FW_CFG",          70, VM::qemu_fw_cfg } },
+            { VM::SYSTEMD,{ "SYSTEMD",              35, VM::systemd_virt } },
+            { VM::CTYPE,{ "CTYPE",                20, VM::chassis_type } },
+            { VM::DOCKERENV,{ "DOCKERENV",           100, VM::dockerenv } },
+            { VM::DMIDECODE,{ "DMIDECODE",            55, VM::dmidecode } },
+            { VM::DMESG,{ "DMESG",                55, VM::dmesg } },
+            { VM::HWMON,{ "HWMON",                35, VM::hwmon } },
+            { VM::LINUX_USER_HOST,{ "LINUX_USER_HOST",      10, VM::linux_user_host } },
+            { VM::QEMU_VIRTUAL_DMI,{ "QEMU_VIRTUAL_DMI",     40, VM::qemu_virtual_dmi } },
+            { VM::QEMU_USB,{ "QEMU_USB",             20, VM::qemu_usb } },
+            { VM::HYPERVISOR_DIR,{ "HYPERVISOR_DIR",       20, VM::hypervisor_dir } },
+            { VM::UML_CPU,{ "UML_CPU",              80, VM::uml_cpu } },
+            { VM::VBOX_MODULE,{ "VBOX_MODULE",          15, VM::vbox_module } },
+            { VM::SYSINFO_PROC,{ "SYSINFO_PROC",         15, VM::sysinfo_proc } },
+            { VM::DMI_SCAN,{ "DMI_SCAN",             50, VM::dmi_scan } },
+            { VM::PODMAN_FILE,{ "PODMAN_FILE",           5, VM::podman_file } },
+            { VM::WSL_PROC,{ "WSL_PROC",             30, VM::wsl_proc_subdir } },
+            { VM::MAC,{ "MAC",                  20, VM::mac_address_check } },
+            { VM::CONTAINER_PID,{ "CONTAINER_PID",        75, VM::container_proc_id } },
+            { VM::BLUESTACKS_FOLDERS,{ "BLUESTACKS_FOLDERS",    5, VM::bluestacks } },
+            { VM::AMD_SEV_MSR,{ "AMD_SEV_MSR",          50, VM::amd_sev_msr } },
+            { VM::TEMPERATURE,{ "TEMPERATURE",          20, VM::temperature } },
+            { VM::CGROUP,{ "CGROUP",               70, VM::cgroup } },
+            { VM::PROCESSES,{ "PROCESSES",            40, VM::processes } },
         #endif    
 
         #if (VMAWARE_LINUX || VMAWARE_APPLE)
-            {VM::THREAD_COUNT, {35, VM::thread_count}},
+            { VM::THREAD_COUNT,{ "THREAD_COUNT",         35, VM::thread_count } },
         #endif
 
         #if (VMAWARE_APPLE)
-            {VM::MAC_MEMSIZE, {15, VM::hw_memsize}},
-            {VM::MAC_IOKIT, {100, VM::io_kit}},
-            {VM::MAC_SIP, {100, VM::mac_sip}},
-            {VM::IOREG_GREP, {100, VM::ioreg_grep}},
-            {VM::HWMODEL, {100, VM::hwmodel}},
-            {VM::MAC_SYS, {100, VM::mac_sys}},
+            { VM::MAC_MEMSIZE,{ "MAC_MEMSIZE",          15, VM::hw_memsize } },
+            { VM::MAC_IOKIT,{ "MAC_IOKIT",           100, VM::io_kit } },
+            { VM::MAC_SIP,{ "MAC_SIP",             100, VM::mac_sip } },
+            { VM::IOREG_GREP,{ "IOREG_GREP",          100, VM::ioreg_grep } },
+            { VM::HWMODEL,{ "HWMODEL",             100, VM::hwmodel } },
+            { VM::MAC_SYS,{ "MAC_SYS",             100, VM::mac_sys } },
         #endif
 
-        {VM::TIMER, {45, VM::timer}},
-        {VM::THREAD_MISMATCH, {45, VM::thread_mismatch}},
-        {VM::VMID, {100, VM::vmid}},
-        {VM::CPU_BRAND, {95, VM::cpu_brand}},
-        {VM::CPUID_SIGNATURE, {95, VM::cpuid_signature}},
-        {VM::HYPERVISOR_STR, {150, VM::hypervisor_str}},
-        {VM::HYPERVISOR_BIT, {150, VM::hypervisor_bit}},
-        {VM::BOCHS_CPU, {100, VM::bochs_cpu}},
-        {VM::KGT_SIGNATURE, {80, VM::intel_kgt_signature}}
-        /* END OF TECHNIQUE TABLE */
+        { VM::TIMER,{ "TIMER",                45, VM::timer } },
+        { VM::THREAD_MISMATCH,{ "THREAD_MISMATCH",      45, VM::thread_mismatch } },
+        { VM::VMID,{ "VMID",                100, VM::vmid } },
+        { VM::CPU_BRAND,{ "CPU_BRAND",            95, VM::cpu_brand } },
+        { VM::CPUID_SIGNATURE,{ "CPUID_SIGNATURE",      95, VM::cpuid_signature } },
+        { VM::HYPERVISOR_STR,{ "HYPERVISOR_STR",      150, VM::hypervisor_str } },
+        { VM::HYPERVISOR_BIT,{ "HYPERVISOR_BIT",      150, VM::hypervisor_bit } },
+        { VM::BOCHS_CPU,{ "BOCHS_CPU",           100, VM::bochs_cpu } },
+        { VM::KGT_SIGNATURE,{ "KGT_SIGNATURE",        80, VM::intel_kgt_signature } }
     };
 
     /* Fill the table based on ID */
