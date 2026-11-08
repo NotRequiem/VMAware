@@ -6,190 +6,12 @@
  *  ╚████╔╝ ██║ ╚═╝ ██║██║  ██║╚███╔███╔╝██║  ██║██║  ██║███████╗
  *   ╚═══╝  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ 2.8.2 (November 2026)
  *
- *  C++ VM detection library
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Requiem and contributors.
  *
- *  - Developed by: Requiem (https://github.com/NotRequiem)
- *  - Former developer and creator: kernelwernel (https://github.com/kernelwernel)
- *  - Contributed by:
- *      - Alex (https://github.com/greenozon)
- *      - Marek Knápek (https://github.com/MarekKnapek)
- *      - Vladyslav Miachkov (https://github.com/fameowner99)
- *      - Alan Tse (https://github.com/alandtse)
- *      - Georgii Gennadev (https://github.com/D00Movenok)
- *      - utoshu (https://github.com/utoshu)
- *      - Jyd (https://github.com/jyd519)
- *      - dmfrpro (https://github.com/dmfrpro)
- *      - Pierre-Étienne Messier (https://github.com/pemessier)
- *      - Teselka (https://github.com/Teselka)
- *      - Kyun-J (https://github.com/Kyun-J)
- *      - luukjp (https://github.com/luukjp)
- *      - Lorenzo Rizzotti (https://github.com/Dreaming-Codes) 
- *      - virtfunc (https://github.com/virtfunc)
- *      - Wiisus (https://github.com/wiisus)
- *      - Max Ufer (https://github.com/Manny684)
- *      - everdox (https://github.com/everdox)
- *  - Repository: https://github.com/NotRequiem/VMAware
- *  - Docs: https://github.com/NotRequiem/VMAware/docs/documentation.md
- *  - Full credits: https://github.com/NotRequiem/VMAware#credits-and-contributors-%EF%B8%8F
- *  - License: MIT
- *
- *
- * ============================== SECTIONS ==================================
- * - enums for publicly accessible techniques  => line 832
- * - struct for internal cpu operations        => line 1095
- * - struct for internal memoization           => line 3351
- * - struct for internal utility functions     => line 4680
- * - struct for internal core components       => line 15654
- * - start of VM detection technique list      => line 6329
- * - start of public VM detection functions    => line 16152
- * - start of externally defined variables     => line 16855
- *
- *
- * ============================== EXAMPLE ===================================
- * #include "vmaware.hpp"
- * #include <iostream>
- * 
- * int main() {
- *     if (VM::detect()) {
- *         std::cout << "Virtual machine detected!" << "\n";
- *     } else {
- *         std::cout << "Running on bare metal" << "\n";
- *     }
- * 
- *     std::cout << "VM name: " << VM::brand() << "\n";
- *     std::cout << "VM type: " << VM::type() << "\n";
- *     std::cout << "VM certainty: " << (int)VM::percentage() << "%" << "\n";
- * }
- * 
- *
- * ========================== CODE DOCUMENTATION =============================
- *
- *
- * Welcome! This is just a preliminary text to lay the context of how it works, 
- * how it's structured, and to guide anybody who's trying to understand the whole code. 
- * Reading over 10k+ lines of other people's C++ code is obviously not an easy task, 
- * and that's perfectly understandable. We'd struggle as well if we were in your position
- * while not even knowing where to start. So here's a more human-friendly explanation:
- * 
- * 
- * Firstly, the lib is completely static, meaning that there's no need for struct 
- * constructors to be initialized (unless you're using the VM::vmaware struct).
- * The main focus of the lib are the tables:
- *  - the TECHNIQUE table stores all the VM detection technique information in a std::array 
- * 
- *  - the BRAND table stores every VM brand as a std::array as well, but as a scoreboard. 
- *    This means that if a VM detection technique has detected a VM brand, that brand will have an
- *    incremented score. After every technique is run, the brand with the highest score
- *    is chosen as the officially detected brand. 
- * 
- * The techniques are all static functions, which all return a boolean. There are a few 
- * categories of techniques that target vastly different things such as OS queries, CPU
- * values, other hardware values, firmware data, and system files just to name a few. 
- * 
- * 
- * Secondly, there are multiple modules in the lib that are combined to integrate with
- * the functionalities needed:
- *    - core module:
- *        This contains many important components such as the aforementioned tables, 
- *        the standard structure for how VM techniques are organised, functionalities 
- *        to run all the techniques in the technique table, functionalities to run
- *        custom-made techniques by the user, and an argument handler based on the 
- *        argument input by the user.
- *
- *    - cpu module:
- *        As the name suggests, this contains functionalities for the CPU. There are
- *        many techniques that utilise some kind of low-level CPU interaction, so 
- *        this module was added to further standardise it.
- * 
- *    - memo module:
- *        This contains functionalities for memoizing technique results (not to be
- *        confused with "memorization"). More specifically, this allows us to cache 
- *        a technique result in a table where each entry contains a technique and its
- *        result. This allows us to avoid re-running techniques which happens a lot
- *        internally. Some techniques are costlier than others in terms of 
- *        performance, so this is a crucial module that allows us to save a lot of
- *        time. Additionally, it contains other memoization caches for various other
- *        things for convenience. 
- * 
- *    - util module:
- *        This contains many utility functionalities to be used by the techniques.
- *        Examples of functionalities include file I/O, registries, permission 
- *        checks, system commands, debugs, OS queries, Hyper-X, and so on. 
- * 
- * 
- * Thirdly, We'll explain in this section how all of these facets of the lib interact with 
- * each other. Let's take an example with VM::detect(), where it returns a boolean true or 
- * false if a VM has been detected or not. The chain of steps it takes goes like this:
- *    1. The function tries to handle the user arguments (if there's 
- *       any), and generates a std::bitset. This bitset has a length of 
- *       every VM detection technique + settings, where each bit 
- *       corresponds to whether this technique will be run or not, 
- *       and which settings were selected. 
- * 
- *    2. After the bitset has been generated, this information is then 
- *       passed to the core module of the lib. It analyses the bitset, 
- *       and runs every VM detection technique that has been selected, 
- *       while ignoring the ones that weren't (by default most of them 
- *       are already selected anyway). The function that does this 
- *       mechanism is core::run_all()
- * 
- *    3. While the core::run_all() function is being run, it checks if 
- *       each technique has already been memoized or not. If it has, 
- *       retrieve the result from the cache and move to the next technique. 
- *       If it hasn't, run the technique and cache the result in the 
- *       cache table. 
- * 
- *    4. After every technique has been executed, this generates a 
- *       uint16_t score. Every technique has a score value between 0 to 
- *       100, and if a VM is detected then this score is accumulated to 
- *       a total. If the total is above 150, that means it's a VM[1]. 
- * 
- * 
- * There are other functions such as VM::brand(), which returns a std::string of the most 
- * likely brand that your system is running on. It has a bit of a different mechanism:
- *    1. Same as step 1 in VM::detect()
- * 
- *    2. Check if the majority of techniques have been run already and stored
- *       in the cache. If not, invoke core::run_all(). The reason why this is
- *       important is because a lot of techniques increment a point for its 
- *       respected brand that was detected. For example, if the VM::QEMU_USB
- *       technique has detected a VM, it'll add a score to the QEMU brand in
- *       the scoreboard. If no technique were run, then there's no way to
- *       populate the scoreboard with any points. After every VM detection 
- *       technique has been invoked/retrieved, the brand scoreboard is now
- *       ready to be analysed.
- * 
- *    3. Create a filter for the scoreboard, where every brand that has a score
- *       of 0 are erased for abstraction purposes. Now the scoreboard is only
- *       populated with relevant brands where they all have at least a single
- *       point. These are the contenders for which brand will be outputted.
- *       Think of it as fetching candidates with potential while discarding
- *       those that don't.
- * 
- *    4. Merge certain brand combinations together. For example, Azure's cloud 
- *       is based on Hyper-V, but Hyper-V may have a higher score due to the 
- *       prevalence of it in a practical setting, which will put Azure to the 
- *       side. In reality, there should be an indication that Azure is involved
- *       since it's a better idea to let the user know that the brand is "Azure 
- *       Hyper-V" instead of just "Hyper-V". So what this step does is "merge" 
- *       the brands together to form a more accurate idea of the brand(s) involved.
- * 
- *    5. After all of this, the scoreboard is sorted in descending order, where
- *       the brands with the highest points are now selected as the official 
- *       output of the VM::brand() function.
- * 
- *    6. The result is then cached in the memo module, so if another function
- *       invokes VM::brand() again, the result is retrieved from the cache 
- *       without needing to run all of the previous steps again.
- *      
- * (NOTE: it's a bit more complicated than this, but that's the gist of how this function works)
- * 
- * Most of the functions provided usually depend on the 2 techniques covered. 
- * And they serve as a functionality base for other components of the lib.
- *      
- *  
- *  [1]: If the user has provided a setting argument called VM::HIGH_THRESHOLD, 
- *       the threshold becomes 300 instead of 150.
+ * Repository:    https://github.com/NotRequiem/VMAware
+ * Documentation: https://github.com/NotRequiem/VMAware/tree/main/docs
+ * Architecture:  https://github.com/NotRequiem/VMAware/blob/main/docs/ARCHITECTURE.md
  */
 
 #ifndef VMAWARE_HEADER
@@ -4455,231 +4277,45 @@ public:
             return exception_status;
         };
 
-        /* Retrieves the addresses of specified functions from a loaded module using the export directory, manual implementation of GetProcAddress without PE export forwarding parsing */
-        static void get_function(const HMODULE module, const char* const VMAWARE_RESTRICT names[], void** const VMAWARE_RESTRICT functions, const size_t count, const bool cache_result = true) {
-            using func_map = std::unordered_map<std::string, void*>;
-            static std::unordered_map<HMODULE, func_map> function_cache;
-
-            if (VMAWARE_UNLIKELY(!functions || !names || count == 0 || count > (SIZE_MAX / sizeof(void*)))) {
+        static inline void get_function(
+            const HMODULE module,
+            const char* const VMAWARE_RESTRICT names[],
+            void** const VMAWARE_RESTRICT functions,
+            const size_t count
+        ) {
+            if (!module || !names || !functions || count == 0) {
                 return;
             }
 
-            VMAWARE_ASSUME(names != nullptr);
-            VMAWARE_ASSUME(functions != nullptr);
-
-            std::memset(functions, 0, count * sizeof(void*));
-
-            if (!module) {
-                return;
-            }
-
-            u8* base = reinterpret_cast<u8*>(module);
-            const uintptr_t base_addr = reinterpret_cast<uintptr_t>(base);
-
-            size_t module_size = 0;
-            MEMORY_BASIC_INFORMATION mbi = {};
-            if (VirtualQuery(base, &mbi, sizeof(mbi))) {
-                if (mbi.State != MEM_COMMIT || mbi.AllocationBase != base) {
-                    return;
-                }
-                module_size = static_cast<size_t>(mbi.RegionSize);
-            }
-            else {
-                return;
-            }
-
-            if (base_addr > (UINTPTR_MAX - module_size)) {
-                return;
-            }
-
-            auto valid_range = [&](size_t offset, size_t sz) noexcept -> bool {
-                return (sz > 0) && (offset < module_size) && (sz <= module_size - offset);
-            };
-
-            auto cstr_from_rva = [&](u32 rva) noexcept -> const char* {
-                if (rva == 0 || !valid_range(static_cast<size_t>(rva), 1)) {
-                    return nullptr;
-                }
-
-                const char* start = reinterpret_cast<const char*>(base + rva);
-                const size_t remaining = module_size - static_cast<size_t>(rva);
-                constexpr size_t max_name_scan = 512;
-                const size_t check_len = (remaining < max_name_scan) ? remaining : max_name_scan;
-
-                if (std::memchr(start, '\0', check_len)) {
-                    return start;
-                }
-
-                return nullptr;
-            };
-
-            /* Validate DOS header */
-            if (VMAWARE_UNLIKELY(!valid_range(0, sizeof(IMAGE_DOS_HEADER)))) {
-                return;
-            }
-            const auto* dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-            if (VMAWARE_UNLIKELY(dos_header->e_magic != IMAGE_DOS_SIGNATURE)) {
-                return;
-            }
-
-            /* e_lfanew -> NT headers */
-            if (VMAWARE_UNLIKELY(dos_header->e_lfanew < 0 || (static_cast<size_t>(dos_header->e_lfanew) % sizeof(u32)) != 0)) {
-                return;
-            }
-            const size_t e_lfanew = static_cast<size_t>(dos_header->e_lfanew);
-
-            if (e_lfanew + sizeof(IMAGE_NT_HEADERS) > module_size) {
-                MEMORY_BASIC_INFORMATION nt_mbi = {};
-                if (VirtualQuery(base + e_lfanew, &nt_mbi, sizeof(nt_mbi))) {
-                    if (nt_mbi.State == MEM_COMMIT && nt_mbi.AllocationBase == base) {
-                        const size_t region_end = static_cast<size_t>(reinterpret_cast<u8*>(nt_mbi.BaseAddress) - base) + nt_mbi.RegionSize;
-                        if (e_lfanew + sizeof(IMAGE_NT_HEADERS) <= region_end) {
-                            module_size = region_end;
-                        }
-                    }
-                }
-            }
-
-            if (VMAWARE_UNLIKELY(!valid_range(e_lfanew, sizeof(IMAGE_NT_HEADERS)))) {
-                return;
-            }
-            const auto* nt_headers = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + e_lfanew);
-            if (VMAWARE_UNLIKELY(nt_headers->Signature != IMAGE_NT_SIGNATURE)) {
-                return;
-            }
-
-        #if defined(_WIN64)
-            if (nt_headers->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-                return;
-            }
-        #else
-            if (nt_headers->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-                return;
-            }
-        #endif
-
-            const size_t size_of_image = static_cast<size_t>(nt_headers->OptionalHeader.SizeOfImage);
-            constexpr size_t max_module_size = 1024u * 1024u * 1024u;
-            if (size_of_image < sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS) || size_of_image > max_module_size) {
-                return;
-            }
-            if (size_of_image > module_size) {
-                module_size = size_of_image;
-            }
-
-            /* Check export data directory exists */
-            if (nt_headers->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT) {
-                return;
-            }
-
-            const auto& dd = nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-            if (dd.VirtualAddress == 0 || dd.Size == 0) {
-                return;
-            }
-
-            /* Validate export directory fits */
-            if (!valid_range(static_cast<size_t>(dd.VirtualAddress), sizeof(IMAGE_EXPORT_DIRECTORY))) {
-                return;
-            }
-
-            const auto* export_directory = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(base + dd.VirtualAddress);
-
-            const u32 name_count = export_directory->NumberOfNames;
-            const u32 function_count = export_directory->NumberOfFunctions;
-
-            constexpr u32 max_names = 1u << 20;
-            if (name_count == 0 || name_count > max_names) {
-                return;
-            }
-            if (function_count == 0 || function_count > max_names) {
-                return;
-            }
-
-            const u32 addr_names = export_directory->AddressOfNames;
-            const u32 addr_funcs = export_directory->AddressOfFunctions;
-            const u32 addr_ord = export_directory->AddressOfNameOrdinals;
-
-            if (addr_names == 0 || addr_funcs == 0 || addr_ord == 0) {
-                return;
-            }
-            if (!valid_range(static_cast<size_t>(addr_names), static_cast<size_t>(name_count) * sizeof(u32))) {
-                return;
-            }
-            if (!valid_range(static_cast<size_t>(addr_funcs), static_cast<size_t>(function_count) * sizeof(u32))) {
-                return;
-            }
-            if (!valid_range(static_cast<size_t>(addr_ord), static_cast<size_t>(name_count) * sizeof(u16))) {
-                return;
-            }
-
-            const u32* name_rvas = reinterpret_cast<const u32*>(base + addr_names);
-            const u32* func_rvas = reinterpret_cast<const u32*>(base + addr_funcs);
-            const u16* ordinals = reinterpret_cast<const u16*>(base + addr_ord);
-
-            if (VMAWARE_UNLIKELY(!name_rvas || !func_rvas || !ordinals)) {
-                return;
-            }
-
-            VMAWARE_ASSUME(name_rvas != nullptr);
-            VMAWARE_ASSUME(func_rvas != nullptr);
-            VMAWARE_ASSUME(ordinals != nullptr);
+            /* hash key -> function pointer */
+            static std::unordered_map<u64, void*> cache;
 
             for (size_t i = 0; i < count; ++i) {
-                const char* current_name = names[i];
-                if (!current_name) {
+                const char* name = names[i];
+                if (!name) {
+                    functions[i] = nullptr;
                     continue;
                 }
-                const std::string s_name(current_name);
 
-                /* Only query and populate the cache if it's not a dynamically loaded module with LoadLibraryEx */
-                if (cache_result) {
-                    func_map& module_cache = function_cache[module];
-                    const auto cache_it = module_cache.find(s_name);
-                    if (VMAWARE_LIKELY(cache_it != module_cache.end())) {
-                        functions[i] = cache_it->second;
-                        continue;
-                    }
+                /*
+                 * 64-bit FNV-1a hash combining the module pointer and string characters
+                 * This is done because function names like NtAllocateVirtualMemory (23 chars) exceed C++'s 15-character SSO limit
+                 * forcing std::string to call malloc and free on every lookup, this is why we hash to eliminate heap allocations entirely
+                 */
+                u64 key = reinterpret_cast<uintptr_t>(module) ^ 14695981039346656037ULL;
+                const char* p = name;
+                while (*p) {
+                    key = (key ^ static_cast<unsigned char>(*p++)) * 1099511628211ULL;
                 }
 
-                /* Binary search over names */
-                u32 lo = 0, hi = name_count;
-                while (lo < hi) {
-                    const u32 mid = lo + (hi - lo) / 2;
-                    const u32 mid_name_rva = name_rvas[mid];
-                    const char* mid_name = cstr_from_rva(mid_name_rva);
-                    if (!mid_name) {
-                        lo = name_count;
-                        break;
-                    }
-
-                    const i32 cmp = strcmp(current_name, mid_name);
-                    if (cmp > 0) {
-                        lo = mid + 1;
-                    }
-                    else {
-                        hi = mid;
-                    }
+                const auto it = cache.find(key);
+                if (it != cache.end()) {
+                    functions[i] = it->second;
                 }
-
-                if (lo < name_count) {
-                    const char* candidate_name = cstr_from_rva(name_rvas[lo]);
-                    if (candidate_name && strcmp(current_name, candidate_name) == 0) {
-                        const u16 name_ordinal = ordinals[lo];
-                        if (static_cast<u32>(name_ordinal) >= function_count) {
-                            continue;
-                        }
-                        const u32 function_rva = func_rvas[name_ordinal];
-                        if (function_rva == 0 || !valid_range(static_cast<size_t>(function_rva), 1)) {
-                            continue;
-                        }
-                        void* addr = reinterpret_cast<void*>(base + function_rva);
-                        functions[i] = addr;
-
-                        if (cache_result) {
-                            function_cache[module][s_name] = addr;
-                        }
-                        continue;
-                    }
+                else {
+                    void* addr = reinterpret_cast<void*>(GetProcAddress(module, name));
+                    cache[key] = addr;
+                    functions[i] = addr;
                 }
             }
         }
@@ -13881,11 +13517,7 @@ public:
 
         HANDLE current_process = reinterpret_cast<HANDLE>(-1);
 
-        /*
-         * -------------------------------------------------------------------------
-         * Helper lambdas
-         * -------------------------------------------------------------------------
-         */
+        /* Helper lambdas */
         auto buffer_contains_ascii_ci = [](const BYTE* data, size_t len, const char* pat) noexcept -> bool {
             if (!data || len == 0 || !pat || pat[0] == '\0') {
                 return false;
@@ -14008,11 +13640,7 @@ public:
             return false;
         };
 
-        /*
-         * -------------------------------------------------------------------------
-         * Main logic block
-         * -------------------------------------------------------------------------
-         */
+        /* Main logic block */
         do {
             if (!OpenProcessToken(current_process, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token_handle)) {
                 break;
@@ -14080,11 +13708,7 @@ public:
                 break;
             }
 
-            /*
-             * ---------------------------------------------------------------------
-             * Constants and data
-             * ---------------------------------------------------------------------
-             */
+            /* Constants and data */
             constexpr const char redhat_sig_ascii[] = "red hat";
             constexpr const wchar_t redhat_sig_wide[] = L"red hat";
             SIZE_T pk_default_len = 0;
@@ -14093,11 +13717,7 @@ public:
             constexpr size_t MAX_NAME_BYTE_LIMIT = 4096;
             bool should_break_loop = false;
 
-            /*
-             * ---------------------------------------------------------------------
-             * Iteration loop
-             * ---------------------------------------------------------------------
-             */
+            /* Iteration loop */
             while (true) {
                 const uintptr_t base_address = reinterpret_cast<uintptr_t>(enum_base_buffer);
                 const uintptr_t current_address = reinterpret_cast<uintptr_t>(current_var);
@@ -16093,7 +15713,7 @@ public:
             "Tbsi_Get_TCG_Log"
         };
         void* functions[ARRAYSIZE(function_names)] = {};
-        memory::get_function(tbs, function_names, functions, ARRAYSIZE(function_names), false);
+        memory::get_function(tbs, function_names, functions, ARRAYSIZE(function_names));
 
         tbsi_get_tcg_log_ex_fn tbsi_get_tcg_log_ex = reinterpret_cast<tbsi_get_tcg_log_ex_fn>(functions[0]);
         tbsi_context_create_fn tbsi_context_create = reinterpret_cast<tbsi_context_create_fn>(functions[1]);
