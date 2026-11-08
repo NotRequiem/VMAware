@@ -8075,6 +8075,8 @@ public:
         }();
 
         return timer_result;
+    #else
+        return false;
     #endif
     }
 #endif
@@ -17302,6 +17304,9 @@ public:
             brand_score_t score;
         };
 
+        static vmaware_technique cache[enum_size + 1];
+        static bool executed[enum_size + 1];
+
         static std::array<technique, enum_size + 1> technique_table;
         static std::vector<VM::core::custom_technique> custom_table;
         static size_t custom_table_size;
@@ -17380,7 +17385,16 @@ public:
                     continue;
                 }
 
-                const vmaware_technique res = tech.run();
+                /* If already executed (by VM::check or previous run), reuse */
+                vmaware_technique res;
+                if (core::executed[i]) {
+                    res = core::cache[i];
+                }
+                else {
+                    res = tech.run();
+                    core::cache[i] = res;
+                    core::executed[i] = true;
+                }
 
                 if (res.detected) {
                     const u8 pts = (res.score > 0) ? res.score : tech.points;
@@ -17663,11 +17677,17 @@ public:
             return false;
         }
 
-        /* VMAWARE_ASSUME(flag_bit < core::technique_table.size()); */
         const core::technique& pair = core::technique_table.at(flag_bit);
 
         if (auto run_fn = pair.run) {
+            if (core::executed[flag_bit]) {
+                return core::cache[flag_bit].detected;
+            }
+
             const vmaware_technique res = run_fn();
+            core::cache[flag_bit] = res;
+            core::executed[flag_bit] = true;
+
             if (res.detected) {
                 detected_count_num++;
             }
@@ -18310,6 +18330,9 @@ public:
  * These are added here due to warnings related to C++17 inline variables for C++ standards that are under 17
  * It's easier to just group them together rather than having C++17<= preprocessors with inline stuff
  */
+
+VM::vmaware_technique VM::core::cache[VM::enum_size + 1] = {};
+bool VM::core::executed[VM::enum_size + 1] = { false };
 
 /* Scoreboard list of brands, if a VM detection technique detects a brand, that will be incremented here as a single point */
 std::array<VM::core::brand_entry, VM::MAX_BRANDS> VM::core::brand_scoreboard = []() {

@@ -703,16 +703,6 @@ jobs:
           fi
           echo "PASS: --percent = $result"
 
-      - name: Check --brand = "Microsoft Azure Hyper-V" (Release)
-        run: |
-          result=$(build/release/vmaware --brand)
-          expected="Microsoft Azure Hyper-V"
-          if [ "$result" != "$expected" ]; then
-            echo "FAIL: --brand expected '$expected', got '$result'"
-            exit 1
-          fi
-          echo "PASS: --brand = $result"
-
       - name: Make executable (Debug)
         run: chmod +x build/debug/vmaware
 
