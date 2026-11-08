@@ -12,7 +12,7 @@
 #include <fstream>
 
 #if (CLI_LINUX)
-    #include <unistd.h>
+#include <unistd.h>
 #endif
 
 const char* color(const u8 score) {
@@ -103,7 +103,7 @@ static bool is_disabled(const VM::enum_flags flag) {
         return false;
     }
 
-    for (const auto f : VM::disabled_techniques) {
+    for (const auto f : VM::get_disabled_techniques()) {
         if (f == flag) {
             return true;
         }
@@ -127,7 +127,7 @@ static constexpr bool is_unsupported(const VM::enum_flags flag) noexcept {
     return !(
         (flag >= VM::HYPERVISOR_BIT && flag <= VM::KGT_SIGNATURE) ||
         (flag >= VM::MACOS_START && flag <= VM::MACOS_END)
-     );
+    );
 #else
     return false;
 #endif
@@ -247,11 +247,11 @@ static void checker(const VM::enum_flags flag, const char* message) {
     if (is_disabled(flag)) {
         disabled_count++;
 
-    #if (CLI_WINDOWS && !CLI_ARM)
+#if (CLI_WINDOWS && !CLI_ARM)
         if (g_tui.enabled) {
             return;
         }
-    #endif
+#endif
 
         std::ostringstream skip_oss;
         skip_oss << tag_skipped << " " << grey << "Skipped " << message << "." << ansi_exit;
@@ -317,7 +317,8 @@ bool parse_disable_token(const char* token) {
                 names.push_back(current);
                 current.clear();
             }
-        } else {
+        }
+        else {
             current += c;
         }
     }
@@ -337,7 +338,7 @@ bool parse_disable_token(const char* token) {
             return false;
         }
 
-        VM::disabled_techniques.push_back(flag);
+        VM::get_disabled_techniques().push_back(flag);
     }
 
     return true;
@@ -411,7 +412,7 @@ void generate_json(const char* output) {
 }
 
 u32 get_technique_count() noexcept {
-     return static_cast<u32>(VM::technique_count);
+    return static_cast<u32>(VM::technique_count());
 }
 
 i32 run_stdout(bool high_threshold, bool all, bool dynamic) noexcept {
@@ -470,9 +471,9 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
     const VM::enum_flags all_arg = all ? VM::ALL : VM::NULL_ARG;
     const VM::enum_flags dynamic_arg = dynamic ? VM::DYNAMIC : VM::NULL_ARG;
 
-    #if (CLI_LINUX)
-        [[maybe_unused]] const bool notes_enabled = !arg_bitset.test(NOTES);
-    #endif
+#if (CLI_LINUX)
+    [[maybe_unused]] const bool notes_enabled = !arg_bitset.test(NOTES);
+#endif
 
     std::ofstream output_fstream;
     std::streambuf* old_cout_buf = nullptr;
@@ -493,52 +494,52 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
         tag_skipped = ("[  DISABLED  ]");
         tag_notes = ("[    NOTE    ]");
         tag_no_perms = ("[  NO PERMS  ]");
-        bold = ""; 
-        underline = ""; 
-        ansi_exit = ""; 
-        red = ""; 
+        bold = "";
+        underline = "";
+        ansi_exit = "";
+        red = "";
         orange = "";
-        green = ""; 
-        red_orange = ""; 
+        green = "";
+        red_orange = "";
         green_orange = "";
-        grey = ""; 
+        grey = "";
         white = "";
     }
 
-    #if (CLI_WINDOWS && !CLI_ARM)
-        std::unique_ptr<debug_interceptor> interceptor;
-        std::streambuf* old_cout = nullptr;
-        std::streambuf* old_cerr = nullptr;
-        std::streambuf* old_clog = nullptr;
-        if (!arg_bitset.test(NO_ANSI) && arg_bitset.test(RICH)) {
-            std::string tui_tag_grey = "\x1B[38;2;110;110;110m";
+#if (CLI_WINDOWS && !CLI_ARM)
+    std::unique_ptr<debug_interceptor> interceptor;
+    std::streambuf* old_cout = nullptr;
+    std::streambuf* old_cerr = nullptr;
+    std::streambuf* old_clog = nullptr;
+    if (!arg_bitset.test(NO_ANSI) && arg_bitset.test(RICH)) {
+        std::string tui_tag_grey = "\x1B[38;2;110;110;110m";
 
-            tag_detected = bold + "[" + red + "  DETECTED  " + bold + "]" + ansi_exit;
-            tag_not_detected = tui_tag_grey + "[" + "NOT DETECTED" + "]" + ansi_exit;
+        tag_detected = bold + "[" + red + "  DETECTED  " + bold + "]" + ansi_exit;
+        tag_not_detected = tui_tag_grey + "[" + "NOT DETECTED" + "]" + ansi_exit;
 
-            grey = "\x1B[38;2;85;85;85m";
+        grey = "\x1B[38;2;85;85;85m";
 
-            g_tui.init();
-            interceptor = std::make_unique<debug_interceptor>(std::cout.rdbuf());
-            old_cout = std::cout.rdbuf(interceptor.get());
-            old_cerr = std::cerr.rdbuf(interceptor.get());
-            old_clog = std::clog.rdbuf(interceptor.get());
-        }
-    #endif
+        g_tui.init();
+        interceptor = std::make_unique<debug_interceptor>(std::cout.rdbuf());
+        old_cout = std::cout.rdbuf(interceptor.get());
+        old_cerr = std::cerr.rdbuf(interceptor.get());
+        old_clog = std::clog.rdbuf(interceptor.get());
+    }
+#endif
 
-    #if (CLI_LINUX)
-        if (notes_enabled && !is_admin()) {
-            PRINT_LINE("Running under root might give better results");
-        }
-    #elif (CLI_WINDOWS && !CLI_ARM)
-        if (!is_admin() && arg_bitset.test(RICH)) {
-            do {
-                std::ostringstream _oss;
-                _oss << red << "Not running as administrator, NVRAM checks will not run.\n";
-                g_tui.print_left(_oss.str());
-            } while (0);
-        }
-    #endif
+#if (CLI_LINUX)
+    if (notes_enabled && !is_admin()) {
+        PRINT_LINE("Running under root might give better results");
+    }
+#elif (CLI_WINDOWS && !CLI_ARM)
+    if (!is_admin() && arg_bitset.test(RICH)) {
+        do {
+            std::ostringstream _oss;
+            _oss << red << "Not running as administrator, NVRAM checks will not run.\n";
+            g_tui.print_left(_oss.str());
+        } while (0);
+    }
+#endif
 
     const auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -572,7 +573,6 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
     checker(VM::SYSTEM_REGISTERS, "task segment and descriptor tables");
     checker(VM::VMWARE_STR, "STR instruction");
     checker(VM::MUTEX, "mutex strings");
-    checker(VM::THREAD_MISMATCH, "thread count mismatch");
     checker(VM::CUCKOO, "Cuckoo");
     checker(VM::AZURE, "Azure Hyper-V");
     checker(VM::DISPLAY, "display");
@@ -631,9 +631,9 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
 #if defined(VMAWARE_DEBUG)
     bool print_sha = true;
 
-    #if (CLI_WINDOWS && !CLI_ARM)
-        print_sha = !g_tui.enabled;
-    #endif
+#if (CLI_WINDOWS && !CLI_ARM)
+    print_sha = !g_tui.enabled;
+#endif
 
     if (print_sha) {
         std::cout << grey << "\nSHA-256: " << white << compute_self_sha256() << ansi_exit << "\n";
@@ -653,13 +653,17 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
 
     if (vm.percentage == 0) {
         percent_color = red.c_str();
-    } else if (vm.percentage < 25) {
+    }
+    else if (vm.percentage < 25) {
         percent_color = red_orange.c_str();
-    } else if (vm.percentage < 50) {
+    }
+    else if (vm.percentage < 50) {
         percent_color = orange.c_str();
-    } else if (vm.percentage < 75) {
+    }
+    else if (vm.percentage < 75) {
         percent_color = green_orange.c_str();
-    } else {
+    }
+    else {
         percent_color = green.c_str();
     }
 
@@ -714,7 +718,8 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
                 if ((static_cast<unsigned long long>(char_count) - 1) >= (static_cast<unsigned long long>(60) + 3)) {
                     it = divided_description.insert(it + 1, "\n");
                     char_count = it->length() + 1;
-                } else {
+                }
+                else {
                     continue;
                 }
             }
@@ -805,9 +810,15 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
             }
         }
 
-        if (old_cout) std::cout.rdbuf(old_cout);
-        if (old_cerr) std::cerr.rdbuf(old_cerr);
-        if (old_clog) std::clog.rdbuf(old_clog);
+        if (old_cout) {
+            std::cout.rdbuf(old_cout);
+        }
+        if (old_cerr) {
+            std::cerr.rdbuf(old_cerr);
+        }
+        if (old_clog) {
+            std::clog.rdbuf(old_clog);
+        }
     }
     else {
         std::cout << "\n";
