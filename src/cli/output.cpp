@@ -619,7 +619,6 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
     checker(VM::CGROUP, "cgroup namespace");
     checker(VM::MEASURED_BOOT, "measured boot logs");
     checker(VM::TPM, "TPM");
-    checker(VM::HYPERVISOR_HOOK, "EPT/NPT hooking");
     checker(VM::VCPU_SCHEDULING, "vCPU scheduling");
     checker(VM::EMULATION, "instruction emulation");
     checker(VM::TIMER, "timing anomalies");
