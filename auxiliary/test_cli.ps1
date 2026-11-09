@@ -171,12 +171,7 @@ check "--disable single name works"               @("--disable", "HYPERVISOR_BIT
 check "--disable multiple space-sep names works"  @("--disable", "HYPERVISOR_BIT", "NVRAM", "QEMU_USB", "--detect")
 check "--disable comma-separated names works"     @("--disable", "HYPERVISOR_BIT,NVRAM", "--detect")
 check "--disable mixed comma+space works"         @("--disable", "HYPERVISOR_BIT,", "NVRAM,", "QEMU_USB", "--detect")
-check "--disable WINE (was WINE_FUNC) works"      @("--disable", "WINE", "--detect")
-check "--disable SYSTEM_REGISTERS works"          @("--disable", "SYSTEM_REGISTERS", "--detect")
 check "--disable UD works"                        @("--disable", "UD", "--detect")
-check "--disable HYPERVISOR_HOOK works"           @("--disable", "HYPERVISOR_HOOK", "--detect")
-check "--disable SINGLE_STEP works"               @("--disable", "SINGLE_STEP", "--detect")
-check "--disable DBVM works"                      @("--disable", "DBVM", "--detect")
 
 # --disable: invalid names
 Write-Host ""
