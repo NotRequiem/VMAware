@@ -386,7 +386,6 @@
 #include <limits>
 #include <cstddef>
 #include <system_error>
-#include <ranges>
 #include <cstdio>
 #include <functional>
 #include <cstring>
@@ -969,6 +968,8 @@ public:
     static_assert(version != nullptr && version[0] != '\0', "version string cannot be empty");
     static_assert(version[0] >= '0' && version[0] <= '9', "version string must start with a digit (use '2.8.2', do not include 'v')");
     static_assert(version_major >= 10 || version[0] == static_cast<char>('0' + version_major), "Mismatch: the first character of version string does not match version_major");
+
+    #define VMAWARE_TECHNIQUE [[nodiscard]] static vmaware_technique
 
     struct vmaware_technique {
         bool detected;
@@ -2994,7 +2995,7 @@ public:
         #endif
         }
 
-        [[nodiscard]] static vmaware_technique is_admin() noexcept {
+        [[nodiscard]] static bool is_admin() noexcept {
         #if (VMAWARE_LINUX || VMAWARE_APPLE)
             return (geteuid() == 0);
         #elif (VMAWARE_WINDOWS)
@@ -3309,7 +3310,7 @@ public:
         }
 
 
-        [[nodiscard]] static vmaware_technique is_x86_process_on_arm() {
+        [[nodiscard]] static bool is_x86_process_on_arm() {
             static const bool cached = []() -> bool {
             #if (VMAWARE_WINDOWS)
                 const char* brand = cpu::get_brand();
@@ -3972,7 +3973,7 @@ public:
         }
 
     #if (VMAWARE_WINDOWS)
-        [[nodiscard]] static vmaware_technique is_windows_11() {
+        [[nodiscard]] static bool is_windows_11() {
             const HMODULE ntdll = memory::get_module(true);
             if (!ntdll) {
                 return false;
@@ -3994,7 +3995,7 @@ public:
             return rtl_get_version(&vi) == 0 && vi.dwBuildNumber >= 22000;
         }
 
-        [[nodiscard]] static vmaware_technique is_windows_8_or_newer() {
+        [[nodiscard]] static bool is_windows_8_or_newer() {
             const HMODULE ntdll = memory::get_module(true);
             if (!ntdll) {
                 return false;
@@ -4016,7 +4017,7 @@ public:
             return (rtl_get_version(&vi) == 0 && (vi.dwMajorVersion > 6 || (vi.dwMajorVersion == 6 && vi.dwMinorVersion >= 2)));
         }
 
-        [[nodiscard]] static vmaware_technique is_32bit_execution_disabled() noexcept {
+        [[nodiscard]] static bool is_32bit_execution_disabled() noexcept {
         #if (VMAWARE_X86_64)
             wchar_t wow64_dir[MAX_PATH] = { 0 };
             const UINT ret = GetSystemWow64DirectoryW(wow64_dir, MAX_PATH);
@@ -4676,7 +4677,7 @@ public:
      * @category x86
      * @implements VM::VMID
      */
-     [[nodiscard]] static vmaware_technique vmid() {
+     VMAWARE_TECHNIQUE vmid() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -4694,7 +4695,7 @@ public:
      * @category x86
      * @implements VM::CPU_BRAND
      */
-     [[nodiscard]] static vmaware_technique cpu_brand() {
+     VMAWARE_TECHNIQUE cpu_brand() {
      #if (!VMAWARE_X86)
          return false;
      #else
@@ -4749,7 +4750,7 @@ public:
      * @category x86
      * @implements VM::HYPERVISOR_BIT
      */
-    [[nodiscard]] static vmaware_technique hypervisor_bit() {
+    VMAWARE_TECHNIQUE hypervisor_bit() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -4786,7 +4787,7 @@ public:
      * @category x86
      * @implements VM::HYPERVISOR_STR
      */
-    [[nodiscard]] static vmaware_technique hypervisor_str() {
+    VMAWARE_TECHNIQUE hypervisor_str() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -4817,7 +4818,7 @@ public:
      * @author Discovered by Peter Ferrie, Senior Principal Researcher, Symantec Advanced Threat Research peter_ferrie@symantec.com
      * @implements VM::BOCHS_CPU
      */
-    [[nodiscard]] static vmaware_technique bochs_cpu() {
+    VMAWARE_TECHNIQUE bochs_cpu() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -4892,7 +4893,7 @@ public:
      * @category x86
      * @implements VM::CPUID_SIGNATURE
      */
-    [[nodiscard]] static vmaware_technique cpuid_signature() {
+    VMAWARE_TECHNIQUE cpuid_signature() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -5048,7 +5049,7 @@ public:
      * @category x86
      * @implements VM::KGT_SIGNATURE
      */
-    [[nodiscard]] static vmaware_technique intel_kgt_signature() {
+    VMAWARE_TECHNIQUE intel_kgt_signature() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -5074,7 +5075,7 @@ public:
      * @category Windows, x86
      * @implements VM::TIMER
      */
-    [[nodiscard]] static vmaware_technique timer() VMAWARE_SERIALIZE {
+    VMAWARE_TECHNIQUE timer() VMAWARE_SERIALIZE {
     #if (VMAWARE_X86 && VMAWARE_WINDOWS)
         static const vmaware_technique timer_result = []() -> vmaware_technique {
             if (util::is_x86_process_on_arm()) {
@@ -5627,7 +5628,7 @@ public:
      * @category Linux
      * @implements VM::SYSTEMD
      */
-    [[nodiscard]] static vmaware_technique systemd_virt() {
+    VMAWARE_TECHNIQUE systemd_virt() {
         if (!(util::exists("/usr/bin/systemd-detect-virt") || util::exists("/bin/systemd-detect-virt"))) {
             vma_debug("SYSTEMD: ", "binary doesn't exist");
             return false;
@@ -5651,7 +5652,7 @@ public:
      * @category Linux
      * @implements VM::CVENDOR
      */
-    [[nodiscard]] static vmaware_technique chassis_vendor() {
+    VMAWARE_TECHNIQUE chassis_vendor() {
         const char* vendor_file = "/sys/devices/virtual/dmi/id/chassis_vendor";
 
         if (!util::exists(vendor_file)) {
@@ -5676,7 +5677,7 @@ public:
      * @category Linux
      * @implements VM::CTYPE
      */
-    [[nodiscard]] static vmaware_technique chassis_type() {
+    VMAWARE_TECHNIQUE chassis_type() {
         const char* chassis = "/sys/devices/virtual/dmi/id/chassis_type";
 
         if (util::exists(chassis)) {
@@ -5699,7 +5700,7 @@ public:
      * @category Linux
      * @implements VM::DOCKERENV
      */
-    [[nodiscard]] static vmaware_technique dockerenv() {
+    VMAWARE_TECHNIQUE dockerenv() {
         if (util::exists("/.dockerenv") || util::exists("/.dockerinit")) {
             return core::add(brand_enum::DOCKER);
         }
@@ -5714,7 +5715,7 @@ public:
      * @warning Permissions required
      * @implements VM::DMIDECODE
      */
-    [[nodiscard]] static vmaware_technique dmidecode() {
+    VMAWARE_TECHNIQUE dmidecode() {
         auto is_admin = []() -> bool {
             return geteuid() == 0;
         };
@@ -5807,7 +5808,7 @@ public:
      * @category Linux
      * @implements VM::MAC
      */
-    [[nodiscard]] static vmaware_technique mac_address_check() {
+    VMAWARE_TECHNIQUE mac_address_check() {
         struct fdguard {
             int fd;
             explicit fdguard(int fd = -1) : fd(fd) {}
@@ -5924,7 +5925,7 @@ public:
      * @warning Permissions required
      * @implements VM::DMESG
      */
-    [[nodiscard]] static vmaware_technique dmesg() {
+    VMAWARE_TECHNIQUE dmesg() {
         auto is_admin = []() -> bool {
             return geteuid() == 0;
         };
@@ -6021,7 +6022,7 @@ public:
      * @category Linux
      * @implements VM::HWMON
      */
-    [[nodiscard]] static vmaware_technique hwmon() {
+    VMAWARE_TECHNIQUE hwmon() {
         return (!util::exists("/sys/class/hwmon/"));
     }
 
@@ -6031,7 +6032,7 @@ public:
      * @category Linux
      * @implements VM::LINUX_USER_HOST
      */
-    [[nodiscard]] static vmaware_technique linux_user_host() {
+    VMAWARE_TECHNIQUE linux_user_host() {
         if (util::is_admin()) {
             return false;
         }
@@ -6059,7 +6060,7 @@ public:
      * @category ARM, Linux
      * @implements VM::BLUESTACKS_FOLDERS
      */
-    [[nodiscard]] static vmaware_technique bluestacks() {
+    VMAWARE_TECHNIQUE bluestacks() {
     #if (!VMAWARE_ARM)
         return false;
     #else
@@ -6081,7 +6082,7 @@ public:
      * @warning Permissions required
      * @implements VM::AMD_SEV_MSR
 	 */
-	[[nodiscard]] static vmaware_technique amd_sev_msr() {
+	VMAWARE_TECHNIQUE amd_sev_msr() {
     #if (VMAWARE_X86 && (VMAWARE_LINUX || VMAWARE_APPLE))
         if (!cpu::is_amd()) {
             return false;
@@ -6146,7 +6147,7 @@ public:
      * @category Linux
      * @implements VM::QEMU_VIRTUAL_DMI
      */
-    [[nodiscard]] static vmaware_technique qemu_virtual_dmi() {
+    VMAWARE_TECHNIQUE qemu_virtual_dmi() {
         const char* sys_vendor = "/sys/devices/virtual/dmi/id/sys_vendor";
         const char* modalias = "/sys/devices/virtual/dmi/id/modalias";
 
@@ -6169,7 +6170,7 @@ public:
      * @warning Permissions required
      * @implements VM::QEMU_USB
      */
-    [[nodiscard]] static vmaware_technique qemu_usb() {
+    VMAWARE_TECHNIQUE qemu_usb() {
         if (!util::is_admin()) {
             return false;
         }
@@ -6197,7 +6198,7 @@ public:
      * @category Linux
      * @implements VM::HYPERVISOR_DIR
      */
-    [[nodiscard]] static vmaware_technique hypervisor_dir() {
+    VMAWARE_TECHNIQUE hypervisor_dir() {
         struct dir_deleter {
             void operator()(DIR* d) const {
                 if (d != nullptr) {
@@ -6254,7 +6255,7 @@ public:
      * @category Linux
      * @implements VM::UML_CPU
      */
-    [[nodiscard]] static vmaware_technique uml_cpu() {
+    VMAWARE_TECHNIQUE uml_cpu() {
         /* Method 1, get the CPU brand model */
         const std::string brand = cpu::get_brand();
 
@@ -6284,7 +6285,7 @@ public:
      * @warning Permissions required
      * @implements VM::KMSG
      */
-    [[nodiscard]] static vmaware_technique kmsg() {
+    VMAWARE_TECHNIQUE kmsg() {
         if (!util::is_admin()) {
             return false;
         }
@@ -6348,7 +6349,7 @@ public:
      * @category Linux
      * @implements VM::VBOX_MODULE
      */
-    [[nodiscard]] static vmaware_technique vbox_module() {
+    VMAWARE_TECHNIQUE vbox_module() {
         const char* file = "/proc/modules";
 
         if (!util::exists(file)) {
@@ -6371,7 +6372,7 @@ public:
      * @category Linux
      * @implements VM::SYSINFO_PROC
      */
-    [[nodiscard]] static vmaware_technique sysinfo_proc() {
+    VMAWARE_TECHNIQUE sysinfo_proc() {
         const char* file = "/proc/sysinfo";
 
         if (!util::exists(file)) {
@@ -6393,7 +6394,7 @@ public:
      * @category Linux
      * @implements VM::DMI_SCAN
      */
-    [[nodiscard]] static vmaware_technique dmi_scan() {
+    VMAWARE_TECHNIQUE dmi_scan() {
         /*
          *  cat: /sys/class/dmi/id/board_serial:   Permission denied
          *  cat: /sys/class/dmi/id/chassis_serial: Permission denied
@@ -6468,7 +6469,7 @@ public:
      * @warning Permissions required
      * @implements VM::SMBIOS_VM_BIT
      */
-    [[nodiscard]] static vmaware_technique smbios_vm_bit() {
+    VMAWARE_TECHNIQUE smbios_vm_bit() {
         if (!util::is_admin()) {
             return false;
         }
@@ -6497,7 +6498,7 @@ public:
      * @category Linux
      * @implements VM::PODMAN_FILE
      */
-    [[nodiscard]] static vmaware_technique podman_file() {
+    VMAWARE_TECHNIQUE podman_file() {
         if (util::exists("/run/.containerenv")) {
             return core::add(brand_enum::PODMAN);
         }
@@ -6511,7 +6512,7 @@ public:
      * @category Linux
      * @implements VM::WSL_PROC
      */
-    [[nodiscard]] static vmaware_technique wsl_proc_subdir() {
+    VMAWARE_TECHNIQUE wsl_proc_subdir() {
         auto read_proc_nonblock = [](const char* path) -> std::string {
             const int fd = open(path, O_RDONLY | O_NONBLOCK);
 
@@ -6555,7 +6556,7 @@ public:
      * @category Linux
      * @implements VM::QEMU_FW_CFG
      */
-     [[nodiscard]] static vmaware_technique qemu_fw_cfg() {
+     VMAWARE_TECHNIQUE qemu_fw_cfg() {
         /*
          * Linux DT method: inspired by https://github.com/ShellCode33/VM-Detection
          * Linux sysfs method: looks for /sys/module/qemu_fw_cfg/ & /sys/firmware/qemu_fw_cfg/
@@ -6587,7 +6588,7 @@ public:
      * @category Linux
      * @implements VM::CONTAINER_PID
      */
-    [[nodiscard]] static vmaware_technique container_proc_id() {
+    VMAWARE_TECHNIQUE container_proc_id() {
         std::ifstream status_file("/proc/self/status");
         if (!status_file.is_open()) {
             return false;
@@ -6640,7 +6641,7 @@ public:
      * @category Linux
      * @implements VM::TEMPERATURE
      */
-    [[nodiscard]] static vmaware_technique temperature() {
+    VMAWARE_TECHNIQUE temperature() {
         if (util::exists("/sys/class/thermal/cooling_device0")) {
             return false;
         }
@@ -6653,7 +6654,7 @@ public:
      * @category Linux
      * @implements VM::CGROUP
      */
-    [[nodiscard]] static vmaware_technique cgroup() {
+    VMAWARE_TECHNIQUE cgroup() {
         const std::string contents = util::read_file("/proc/self/cgroup");
         
         if (contents.empty()) {
@@ -6723,7 +6724,7 @@ public:
      * @category Linux
      * @implements VM::PROCESSES
      */
-    [[nodiscard]] static vmaware_technique processes() {
+    VMAWARE_TECHNIQUE processes() {
         if (util::is_proc_running("qemu_ga")) {
             vma_debug("PROCESSES: Detected QEMU guest agent process.");
             return core::add(brand_enum::QEMU);
@@ -6768,7 +6769,7 @@ public:
      * @author Idea to check VPC's range from Tom Liston and Ed Skoudis' paper "On the Cutting Edge: Thwarting Virtual Machine Detection" (Windows)
      * 
      */
-    [[nodiscard]] static vmaware_technique system_registers() {
+    VMAWARE_TECHNIQUE system_registers() {
         if (util::is_x86_process_on_arm()) {
             return false;
         }
@@ -7037,7 +7038,7 @@ public:
      * @category Windows, Linux
      * @implements VM::AZURE
      */
-    [[nodiscard]] static vmaware_technique azure() noexcept {
+    VMAWARE_TECHNIQUE azure() noexcept {
     #if (VMAWARE_WINDOWS)
         char buf[MAX_COMPUTERNAME_LENGTH + 1] = { 0 };
         DWORD len = sizeof(buf);
@@ -7085,7 +7086,7 @@ public:
      * @warning Permissions required on Linux
      * @implements VM::FIRMWARE
      */
-    [[nodiscard]] static vmaware_technique firmware() {
+    VMAWARE_TECHNIQUE firmware() {
     #pragma pack(push, 1)
         struct acpi_header {
             char signature[4];
@@ -7954,7 +7955,7 @@ public:
      * @category Linux, Windows
      * @implements VM::DEVICES
      */
-    [[nodiscard]] static vmaware_technique devices() {
+    VMAWARE_TECHNIQUE devices() {
         struct pci_device { u16 vendor_id; u32 device_id; };
         std::vector<pci_device> devices;
 
@@ -8299,7 +8300,7 @@ public:
      * @author Teselka (https://github.com/Teselka)
      * @implements VM::BOOT_LOGO
      */
-    [[nodiscard]] static vmaware_technique boot_logo()
+    VMAWARE_TECHNIQUE boot_logo()
     #if (VMAWARE_X86 && (VMAWARE_CLANG || VMAWARE_GCC))
         __attribute__((__target__("crc32")))
     #endif
@@ -8425,7 +8426,7 @@ public:
     * @category Windows
     * @implements VM::DISK
     */
-    [[nodiscard]] static vmaware_technique disk() {
+    VMAWARE_TECHNIQUE disk() {
         bool result = false;
 
         /*
@@ -9088,7 +9089,7 @@ public:
      * @category x86 (ARM might have very low thread counts, which is why it should be only for x86)
      * @implements VM::THREAD_COUNT
      */
-    [[nodiscard]] static vmaware_technique thread_count() {
+    VMAWARE_TECHNIQUE thread_count() {
     #if (VMAWARE_X86 && !VMAWARE_APPLE)
         vma_debug("THREAD_COUNT: ", "threads = ", memo::thread_count::fetch());
 
@@ -9117,7 +9118,7 @@ public:
      * @category MacOS
      * @implements VM::HWMODEL
      */
-    [[nodiscard]] static vmaware_technique hwmodel() {      
+    VMAWARE_TECHNIQUE hwmodel() {      
         /* Hw.model strings are short (like for example MacBookPro16,1), 128 bytes is plenty */
         char buffer[128] = { 0 };
         size_t size = sizeof(buffer);
@@ -9158,7 +9159,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::MAC_MEMSIZE
      */
-    [[nodiscard]] static vmaware_technique hw_memsize() {
+    VMAWARE_TECHNIQUE hw_memsize() {
         std::unique_ptr<std::string> result = util::sys_result("sysctl -n hw.memsize");
         const std::string ram = *result;
 
@@ -9189,7 +9190,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::MAC_IOKIT
      */
-    [[nodiscard]] static vmaware_technique io_kit() {
+    VMAWARE_TECHNIQUE io_kit() {
         /* Board_ptr and manufacturer_ptr empty */
         std::unique_ptr<std::string> platform_ptr = util::sys_result("ioreg -rd1 -c IOPlatformExpertDevice");
         std::unique_ptr<std::string> board_ptr = util::sys_result("ioreg -rd1 -c board-id");
@@ -9286,7 +9287,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::IOREG_GREP
      */
-    [[nodiscard]] static vmaware_technique ioreg_grep() {
+    VMAWARE_TECHNIQUE ioreg_grep() {
         auto check_usb = []() -> bool {
             std::unique_ptr<std::string> result = util::sys_result("ioreg -rd1 -c IOUSBHostDevice | grep \"USB Vendor Name\"");
             const std::string usb = *result;
@@ -9326,7 +9327,7 @@ public:
      * @link https://evasions.checkpoint.com/src/MacOS/macos.html
      * @implements VM::MAC_SIP
      */
-    [[nodiscard]] static vmaware_technique mac_sip() {
+    VMAWARE_TECHNIQUE mac_sip() {
         int hv_present = 0;
         std::size_t size = sizeof(hv_present);
         if (sysctlbyname("kern.hv_vmm_present",
@@ -9370,7 +9371,7 @@ public:
      * @category MacOS
      * @implements VM::MAC_SYS
      */
-    [[nodiscard]] static vmaware_technique mac_sys() {
+    VMAWARE_TECHNIQUE mac_sys() {
         const char* keyword = "virtual machine";
 
         if (std::unique_ptr<std::string> profiler_res_ptr = util::sys_result("system_profiler SPHardwareDataType")) {
@@ -9400,7 +9401,7 @@ public:
      * @category Windows
      * @implements VM::DLL
      */
-    [[nodiscard]] static vmaware_technique dll() {
+    VMAWARE_TECHNIQUE dll() {
         static constexpr struct {
             const wchar_t* dll_name;
             enum brand_enum brand;
@@ -9430,7 +9431,7 @@ public:
      * @category Windows
      * @implements VM::WINE
      */
-    [[nodiscard]] static vmaware_technique wine() {
+    VMAWARE_TECHNIQUE wine() {
         const HMODULE ntdll = memory::get_module(true);
         const char* ntdll_names[] = { "wine_get_version" };
         void* ntdll_funcs[1] = {};
@@ -9490,7 +9491,7 @@ public:
      * @category Windows
      * @implements VM::POWER_CAPABILITIES
      */
-    [[nodiscard]] static vmaware_technique power_capabilities() {
+    VMAWARE_TECHNIQUE power_capabilities() {
         const HMODULE ntdll = memory::get_module(true);
 
         constexpr const char* function_names[] = { "NtPowerInformation" }; /* Win8 // Windows Server 2012 */
@@ -9545,7 +9546,7 @@ public:
      * @category Windows
      * @implements VM::GAMARUE
      */
-    [[nodiscard]] static vmaware_technique gamarue() {
+    VMAWARE_TECHNIQUE gamarue() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -9678,7 +9679,7 @@ public:
      * @category Windows, x86_32
      * @implements VM::VPC_INVALID
      */
-    [[nodiscard]] static vmaware_technique vpc_invalid() {
+    VMAWARE_TECHNIQUE vpc_invalid() {
         bool rc = false;
     #if (VMAWARE_X86_32 && !VMAWARE_CLANG)
         if (util::is_x86_process_on_arm()) {
@@ -9754,7 +9755,7 @@ public:
      * @category Windows, x86_32
      * @implements VM::VMWARE_STR
      */
-    [[nodiscard]] static vmaware_technique vmware_str() {
+    VMAWARE_TECHNIQUE vmware_str() {
     #if (VMAWARE_X86_32)
         if (util::is_x86_process_on_arm()) {
             return false;
@@ -9787,7 +9788,7 @@ public:
      * @author hfiref0x
      * @implements VM::MUTEX
      */
-    [[nodiscard]] static vmaware_technique mutex() {
+    VMAWARE_TECHNIQUE mutex() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -9878,7 +9879,7 @@ public:
      * @link https://unprotect.it/snippet/checking-specific-folder-name/196/
      * @implements VM::CUCKOO
      */
-    [[nodiscard]] static vmaware_technique cuckoo() {
+    VMAWARE_TECHNIQUE cuckoo() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -9963,7 +9964,7 @@ public:
      * @category Windows
      * @implements VM::DISPLAY
      */
-    [[nodiscard]] static vmaware_technique display() {
+    VMAWARE_TECHNIQUE display() {
         const HDC hdc = GetDC(nullptr);
         if (!hdc) {
             return false;
@@ -9982,7 +9983,7 @@ public:
      * @category Windows
      * @implements VM::DRIVERS
      */
-    [[nodiscard]] static vmaware_technique drivers() {
+    VMAWARE_TECHNIQUE drivers() {
         struct _SYSTEM_MODULE_INFORMATION {
             PVOID  Reserved[2];
             PVOID  ImageBaseAddress;
@@ -10214,7 +10215,7 @@ public:
      * @category Windows
      * @implements VM::GPU_CAPABILITIES
      */
-    [[nodiscard]] static vmaware_technique gpu_capabilities() {
+    VMAWARE_TECHNIQUE gpu_capabilities() {
         /*
             Microsoft::WRL::ComPtr<IDirect3D9> d3d9 {
                 Direct3DCreate9(D3D_SDK_VERSION)
@@ -10254,7 +10255,7 @@ public:
      * @category Windows
      * @implements VM::HANDLES
      */
-    [[nodiscard]] static vmaware_technique device_handles() {
+    VMAWARE_TECHNIQUE device_handles() {
         const HMODULE ntdll = memory::get_module(true);
         if (!ntdll) {
             return false;
@@ -10349,7 +10350,7 @@ public:
      * @category Windows, x86
      * @implements VM::VIRTUAL_PROCESSORS
      */
-    [[nodiscard]] static vmaware_technique virtual_processors() {
+    VMAWARE_TECHNIQUE virtual_processors() {
     #if (VMAWARE_X86)
         int regs[4];
         __cpuid(regs, cpu::leaf::hypervisor);
@@ -10379,7 +10380,7 @@ public:
      * @link https://evasions.checkpoint.com/src/Evasions/techniques/global-os-objects.html
      * @implements VM::VIRTUAL_REGISTRY
      */
-    [[nodiscard]] static vmaware_technique virtual_registry() {
+    VMAWARE_TECHNIQUE virtual_registry() {
         struct custom_unicode_string {
             USHORT Length;
             USHORT MaximumLength;
@@ -10530,7 +10531,7 @@ public:
      * @category Windows
      * @implements VM::ACPI_SIGNATURE
      */
-    [[nodiscard]] static vmaware_technique acpi_signature() {
+    VMAWARE_TECHNIQUE acpi_signature() {
         /* Enumerate all devices */
         const HDEVINFO handle_dev_info = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
         if (handle_dev_info == INVALID_HANDLE_VALUE) {
@@ -10661,7 +10662,7 @@ public:
      * @category Windows, x86_64
      * @implements VM::TRAP
      */
-    [[nodiscard]] static vmaware_technique trap() {
+    VMAWARE_TECHNIQUE trap() {
         if (util::is_x86_process_on_arm()) {
             return false;
         }
@@ -10827,7 +10828,7 @@ public:
      * @category Windows
      * @implements VM::UD
      */
-    [[nodiscard]] static vmaware_technique ud() {
+    VMAWARE_TECHNIQUE ud() {
     #if (VMAWARE_X86) || (VMAWARE_ARM32) || (VMAWARE_ARM64)
         bool saw_ud = false;
 
@@ -10850,7 +10851,7 @@ public:
      * @category Windows
      * @implements VM::INTERRUPT_SHADOW
      */
-    [[nodiscard]] static vmaware_technique interrupt_shadow() {
+    VMAWARE_TECHNIQUE interrupt_shadow() {
     #if (VMAWARE_X86)
         if (util::hyper_x() == HYPERV_HOST) {
             return false;
@@ -11040,7 +11041,7 @@ public:
      * @category Windows
      * @implements VM::DBVM
      */
-    [[nodiscard]] static vmaware_technique dbvm() {
+    VMAWARE_TECHNIQUE dbvm() {
     #if (!VMAWARE_X86_64)
         return false;
     #else
@@ -11212,7 +11213,7 @@ public:
      * @category Windows
      * @implements VM::KERNEL_OBJECTS
      */
-    [[nodiscard]] static vmaware_technique kernel_objects() {
+    VMAWARE_TECHNIQUE kernel_objects() {
         struct OBJECT_DIRECTORY_INFORMATION {
             UNICODE_STRING Name;
             UNICODE_STRING TypeName;
@@ -11380,7 +11381,7 @@ public:
      * @warning Permissions required
      * @implements VM::NVRAM
      */
-    [[nodiscard]] static vmaware_technique nvram() {
+    VMAWARE_TECHNIQUE nvram() {
         if (!util::is_admin()) {
             return false;
         }
@@ -11764,7 +11765,7 @@ public:
      * @category Windows, x86
      * @implements VM::CPU_HEURISTIC
      */
-    [[nodiscard]] static vmaware_technique cpu_heuristic() {
+    VMAWARE_TECHNIQUE cpu_heuristic() {
         bool spoofed = false;
     #if (VMAWARE_X86)
         if (util::is_x86_process_on_arm()) {
@@ -12347,7 +12348,7 @@ public:
      * @category Windows, x86
      * @implements VM::MSR
      */
-    [[nodiscard]] static vmaware_technique msr() {
+    VMAWARE_TECHNIQUE msr() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -12553,7 +12554,7 @@ public:
      * @category Windows, x86
      * @implements VM::KVM_INTERCEPTION
      */
-    [[nodiscard]] static vmaware_technique kvm_interception() {
+    VMAWARE_TECHNIQUE kvm_interception() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -12591,7 +12592,7 @@ public:
      * @category Windows, x86
      * @implements VM::SINGLE_STEP
      */
-    [[nodiscard]] static vmaware_technique single_step() {
+    VMAWARE_TECHNIQUE single_step() {
     #if (!VMAWARE_X86)
         return false;
     #else
@@ -12688,7 +12689,7 @@ public:
      * @author Idea by @NickEverdox (https://github.com/everdox)
      * @implements VM::EIP_OVERFLOW
      */
-    [[nodiscard]] static vmaware_technique eip_overflow() {
+    VMAWARE_TECHNIQUE eip_overflow() {
     #if (!VMAWARE_X86_64) 
         /*
          * This requires mapping executable memory at the end of the 4GB address space (0xFFFF0000) so an instruction can wrap the 32 bit boundary
@@ -12883,7 +12884,7 @@ public:
      * @category Windows, x86
      * @implements VM::SVM_EXCEPTIONS
      */
-    [[nodiscard]] static vmaware_technique svm_exceptions() {
+    VMAWARE_TECHNIQUE svm_exceptions() {
     #if (VMAWARE_X86)   
         if (!cpu::is_amd()) {
             vma_debug("SVM_EXCEPTIONS: AMD CPU not detected");
@@ -12940,7 +12941,7 @@ public:
      * @category Windows
      * @implements VM::MEASURED_BOOT
      */
-    [[nodiscard]] static vmaware_technique measured_boot() {
+    VMAWARE_TECHNIQUE measured_boot() {
         using TBS_RESULT = UINT32;
         using TBS_HCONTEXT = void*;
 
@@ -13235,7 +13236,7 @@ public:
      * @category Windows
      * @implements VM::TPM
      */
-    [[nodiscard]] static vmaware_technique tpm() {
+    VMAWARE_TECHNIQUE tpm() {
     #pragma pack(push, 1)
         struct tcg_pcr_event_header {
             u32 pcr_index;
@@ -13987,7 +13988,7 @@ public:
      * @category Windows
      * @implements VM::VCPU_SCHEDULING
      */
-    [[nodiscard]] static vmaware_technique vcpu_scheduling() {
+    VMAWARE_TECHNIQUE vcpu_scheduling() {
         /* Local descriptor representing a physical processor and its logical mask */
         struct physical_processor_entry {
             u32 physical_id;
@@ -14112,7 +14113,7 @@ public:
      * @category Windows, Linux, Apple
      * @implements VM::EMULATION
      */
-    [[nodiscard]] static vmaware_technique emulation() noexcept {
+    VMAWARE_TECHNIQUE emulation() noexcept {
     #if (VMAWARE_X86)
         if (util::is_x86_process_on_arm()) {
             return false;
