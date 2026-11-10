@@ -14163,7 +14163,123 @@ public:
             return true;
         }
 
-        /* 2. Two-byte INT 3 (0xCD 0x03) */
+        /*
+         * 2. Instruction boundary page straddle
+         * Tests if an instruction decoder or JIT engine correctly decodes and executes a
+         * single instruction spanning across a 4KB boundary between two pages with distinct protections.
+         */
+        auto check_page_boundary_straddle = []() noexcept -> bool {
+        #if (VMAWARE_WINDOWS)
+            SYSTEM_INFO sys_info{};
+            GetSystemInfo(&sys_info);
+            const DWORD page_size = sys_info.dwPageSize ? sys_info.dwPageSize : 4096;
+            const SIZE_T alloc_size = static_cast<SIZE_T>(page_size) * 2;
+
+            /* Allocate two contiguous 4KB pages */
+            u8* base = static_cast<u8*>(VirtualAlloc(nullptr, alloc_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+            if (!base) {
+                return false;
+            }
+
+            u8* page0 = base;
+            u8* page1 = base + page_size;
+
+            /*
+             * Place a 14-byte multi-byte NOP starting 8 bytes before the boundary (0xFF8..0xFFF),
+             * with the remaining 6 bytes on Page 1 (0x1000..0x1005), followed immediately by RET (0xC3):
+             *
+             * Page 0 (0xFF8..0xFFF - 8 bytes):
+             *   66 66 66 66 66 2E 0F 1F  ; 5x operand-size prefixes + CS segment prefix + 0F 1F (NOP opcode)
+             *
+             * Page 1 (0x1000..0x1006 - 7 bytes):
+             *   84 00 00 00 00 00 C3     ; ModR/M + SIB + 32-bit displacement + RET
+             */
+            const u8 page0_bytes[] = { 0x66, 0x66, 0x66, 0x66, 0x66, 0x2E, 0x0F, 0x1F };
+            const u8 page1_bytes[] = { 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC3 };
+
+            const size_t start_offset = page_size - sizeof(page0_bytes);
+            std::memcpy(page0 + start_offset, page0_bytes, sizeof(page0_bytes));
+            std::memcpy(page1, page1_bytes, sizeof(page1_bytes));
+
+            /* Make Page 1 RX while Page 0 remains RWX to enforce distinct paging structures */
+            DWORD old_prot = 0;
+            bool straddle_failed = false;
+
+            if (VirtualProtect(page1, page_size, PAGE_EXECUTE_READ, &old_prot)) {
+                FlushInstructionCache(GetCurrentProcess(), base, alloc_size);
+
+                /* Real hardware decodes across the boundary and returns 0 (no exception) */
+                if (memory::execute_handler(page0 + start_offset) != 0) {
+                    straddle_failed = true;
+                }
+            }
+
+            VirtualFree(base, 0, MEM_RELEASE);
+            return straddle_failed;
+
+        #elif (VMAWARE_LINUX || VMAWARE_APPLE)
+            const long sc_page = sysconf(_SC_PAGESIZE);
+            const size_t page_size = (sc_page > 0) ? static_cast<size_t>(sc_page) : 4096;
+            const size_t alloc_size = page_size * 2;
+
+            u8* base = static_cast<u8*>(mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+            if (base == MAP_FAILED) {
+                return false;
+            }
+
+            u8* page0 = base;
+            u8* page1 = base + page_size;
+
+            const u8 page0_bytes[] = { 0x66, 0x66, 0x66, 0x66, 0x66, 0x2E, 0x0F, 0x1F };
+            const u8 page1_bytes[] = { 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC3 };
+
+            const size_t start_offset = page_size - sizeof(page0_bytes);
+            std::memcpy(page0 + start_offset, page0_bytes, sizeof(page0_bytes));
+            std::memcpy(page1, page1_bytes, sizeof(page1_bytes));
+
+            bool straddle_failed = false;
+            if (mprotect(page1, page_size, PROT_READ | PROT_EXEC) == 0) {
+            #if (VMAWARE_GCC || VMAWARE_CLANG)
+                __builtin___clear_cache(reinterpret_cast<char*>(base), reinterpret_cast<char*>(base + alloc_size));
+            #endif
+
+                static sigjmp_t env;
+                struct sigaction sa;
+                struct sigaction old_segv, old_ill, old_bus;
+
+                std::memset(&sa, 0, sizeof(sa));
+                sa.sa_handler = [](int) { siglongjmp(env, 1); };
+                sigemptyset(&sa.sa_mask);
+
+                sigaction(SIGSEGV, &sa, &old_segv);
+                sigaction(SIGILL, &sa, &old_ill);
+                sigaction(SIGBUS, &sa, &old_bus);
+
+                if (sigsetjmp(env, 1) == 0) {
+                    memory::execute(page0 + start_offset);
+                }
+                else {
+                    straddle_failed = true;
+                }
+
+                sigaction(SIGSEGV, &old_segv, nullptr);
+                sigaction(SIGILL, &old_ill, nullptr);
+                sigaction(SIGBUS, &old_bus, nullptr);
+            }
+
+            munmap(base, alloc_size);
+            return straddle_failed;
+        #else
+            return false;
+        #endif
+        };
+
+        if (check_page_boundary_straddle()) {
+            vma_debug("EMULATION: Detected failure during cross-page instruction fetch");
+            return true;
+        }
+
+        /* 3. Two-byte INT 3 (0xCD 0x03) */
         auto check_two_byte_int3 = []() noexcept -> bool {
         #if (VMAWARE_WINDOWS)
             if (IsDebuggerPresent()) {
@@ -14184,7 +14300,9 @@ public:
                         const char* p = std::strstr(buf, "TracerPid:");
                         if (p) {
                             p += 10;
-                            while (*p == ' ' || *p == '\t') p++;
+                            while (*p == ' ' || *p == '\t') {
+                                p++;
+                            }
                             if (*p != '0') {
                                 return false;
                             }
@@ -14216,8 +14334,8 @@ public:
             sigemptyset(&sa.sa_mask);
 
             sigaction(SIGTRAP, &sa, &old_trap);
-            sigaction(SIGSEGV, &sa, &old_segv);
-            sigaction(SIGILL, &sa, &old_ill);
+            sigaction(SIGSEGV, &old_segv);
+            sigaction(SIGILL, &old_ill);
 
             const int sig_code = sigsetjmp(env, 1);
             if (sig_code == 0) {
@@ -14239,57 +14357,55 @@ public:
             return true;
         }
 
-        #if (VMAWARE_X86_32)
-            /* 3. Undocumented Radix Division via AAM */
-            auto check_legacy_radix = []() noexcept -> bool {
-            #if (VMAWARE_WINDOWS)
-                u32 res = 0;
-                if (memory::execute_ret_handler(aam_radix_stub, res) != 0) {
-                    /* Emulator raised #UD */
-                    return true;
-                }
-                return ((res & 0xFFFFu) != 0x0301u);
-            #elif (VMAWARE_LINUX || VMAWARE_APPLE)
-                static sigjmp_t env;
-                struct sigaction sa;
-                struct sigaction old_ill;
-
-                std::memset(&sa, 0, sizeof(sa));
-                sa.sa_handler = [](int) {
-                    siglongjmp(env, 1);
-                };
-                sigemptyset(&sa.sa_mask);
-                sigaction(SIGILL, &sa, &old_ill);
-
-                u32 res = 0;
-                bool illegal_insn = false;
-                if (sigsetjmp(env, 1) == 0) {
-                    res = memory::execute_ret(aam_radix_stub);
-                }
-                else {
-                    illegal_insn = true;
-                }
-
-                sigaction(SIGILL, &old_ill, nullptr);
-
-                if (illegal_insn) {
-                    /* Emulator raised #UD */
-                    return true;
-                }
-                return ((res & 0xFFFFu) != 0x0301u);
-            #else
-                const u32 res = memory::execute_ret(aam_radix_stub);
-                return ((res & 0xFFFFu) != 0x0301u);
-            #endif
-            };
-
-            if (check_legacy_radix()) {
-                vma_debug("EMULATION: Radix division not handled correctly");
-                return true;
+    #if (VMAWARE_X86_32)
+        /* 4. Undocumented Radix Division via AAM */
+        auto check_legacy_radix = []() noexcept -> bool {
+        #if (VMAWARE_WINDOWS)
+            u32 res = 0;
+            if (memory::execute_ret_handler(aam_radix_stub, res) != 0) {
+                return true; /* Emulator raised #UD */
             }
-        #endif
+            return ((res & 0xFFFFu) != 0x0301u);
+        #elif (VMAWARE_LINUX || VMAWARE_APPLE)
+            static sigjmp_t env;
+            struct sigaction sa;
+            struct sigaction old_ill;
 
-        /* 4. ALU parity and auxiliary flags evaluation */
+            std::memset(&sa, 0, sizeof(sa));
+            sa.sa_handler = [](int) {
+                siglongjmp(env, 1);
+            };
+            sigemptyset(&sa.sa_mask);
+            sigaction(SIGILL, &sa, &old_ill);
+
+            u32 res = 0;
+            bool illegal_insn = false;
+            if (sigsetjmp(env, 1) == 0) {
+                res = memory::execute_ret(aam_radix_stub);
+            }
+            else {
+                illegal_insn = true;
+            }
+
+            sigaction(SIGILL, &old_ill, nullptr);
+
+            if (illegal_insn) {
+                return true; /* Emulator raised #UD */
+            }
+            return ((res & 0xFFFFu) != 0x0301u);
+        #else
+            const u32 res = memory::execute_ret(aam_radix_stub);
+            return ((res & 0xFFFFu) != 0x0301u);
+        #endif
+        };
+
+        if (check_legacy_radix()) {
+            vma_debug("EMULATION: Radix division not handled correctly");
+            return true;
+        }
+    #endif
+
+        /* 5. ALU parity and auxiliary flags evaluation */
         auto check_alu_flags = []() noexcept -> bool {
             const u32 flags = memory::execute_ret(alu_flags_stub);
             const bool af_set = (flags & (1u << 4)) != 0;
@@ -14303,7 +14419,7 @@ public:
             return true;
         }
 
-        /* 5. x87 80-Bit extended-precision storage integrity */
+        /* 6. x87 80-Bit extended-precision storage integrity */
         auto check_x87_precision = []() noexcept -> bool {
             const u32 status = memory::execute_ret(x87_precision_stub);
             /* If truncated to 64-bit double, lowest 11 bits are lost -> diff == 0.0 -> C3 (bit 14) is set */
@@ -14315,7 +14431,7 @@ public:
             return true;
         }
 
-        /* 6. FPU status word stack overflow & condition flags */
+        /* 7. FPU status word stack overflow & condition flags */
         auto check_x87_overflow = []() noexcept -> bool {
             const u32 sw = memory::execute_ret(fpu_overflow_stub);
             /* Physical x87 sets IE (bit 0), SF (bit 6), and C1 (bit 9) -> mask 0x0241 */
