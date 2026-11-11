@@ -1116,43 +1116,24 @@ public:
         }
 
         [[nodiscard]] static bool is_leaf_supported(const u32 p_leaf) {
-        #if (VMAWARE_APPLE) 
+        #if (VMAWARE_APPLE || !VMAWARE_X86)
             return false;
-        #endif
-            bool cached = false;
-
-            if (memo::leaf_cache::fetch(p_leaf, cached)) {
-                return cached;
-            }
-
-            u32 eax = 0; 
-            u32 unused = 0;
-            bool supported = false;
-
+        #else
+            u32 eax = 0, unused = 0;
             if (p_leaf < cpu::leaf::hypervisor) {
-                /* Standard range: 0x00000000 - 0x3FFFFFFF */
                 cpu::cpuid(eax, unused, unused, unused, cpu::leaf::basic_info);
-                vma_debug("CPUID: max standard leaf = 0x", std::hex, eax);
-                supported = (p_leaf <= eax);
+                return p_leaf <= eax;
             }
             else if (p_leaf < cpu::leaf::func_ext) {
-                /* Hypervisor range: 0x40000000 - 0x7FFFFFFF */
                 cpu::cpuid(eax, unused, unused, unused, cpu::leaf::hypervisor);
-                vma_debug("CPUID: max hypervisor leaf = 0x", std::hex, eax);
-                supported = (p_leaf <= eax);
+                return p_leaf <= eax;
             }
             else if (p_leaf < 0xC0000000) {
-                /* Extended range: 0x80000000 - 0xBFFFFFFF */
                 cpu::cpuid(eax, unused, unused, unused, cpu::leaf::func_ext);
-                vma_debug("CPUID: max extended leaf = 0x", std::hex, eax);
-                supported = (p_leaf <= eax);
+                return p_leaf <= eax;
             }
-            else {
-                supported = false;
-            }
-
-            memo::leaf_cache::store(p_leaf, supported);
-            return supported;
+            return false;
+        #endif
         }
 
         [[nodiscard]] static bool is_amd() noexcept {
@@ -3102,87 +3083,50 @@ public:
             return result;
         }
 
-        static void append_to_stream(std::ostringstream& oss, const wchar_t* arg) {
-            oss << narrow_wide(arg);
-        }
-
-        static void append_to_stream(std::ostringstream& oss, const std::wstring& ws) {
-            oss << narrow_wide(ws.c_str());
-        }
-
-        static void append_to_stream(std::ostringstream& oss, const std::string& s) {
-            oss << s;
-        }
-
-        static void append_to_stream(std::ostringstream& oss, const char* s) {
-            if (s) {
-                oss << s;
+        inline static void to_stream(std::ostream& os, const wchar_t* s) {
+            if (!s) {
+                return;
+            }
+            while (*s) {
+                os.put(*s < 128 ? static_cast<char>(*s) : '?'); 
+                ++s;
             }
         }
-
-        static void append_to_stream(std::ostringstream& oss, const char c) {
-            oss << c;
+        inline static void to_stream(std::ostream& os, wchar_t* s) {
+            to_stream(os, static_cast<const wchar_t*>(s));
         }
-
-        static void append_to_stream(std::ostringstream& oss, const bool b) {
-            oss << (b ? "true" : "false");
+        template <std::size_t N>
+        inline static void to_stream(std::ostream& os, const wchar_t(&s)[N]) {
+            to_stream(os, static_cast<const wchar_t*>(s));
         }
-
+        inline static void to_stream(std::ostream& os, const std::wstring& s) {
+            to_stream(os, s.c_str());
+        }
+        inline static void to_stream(std::ostream& os, wchar_t c) {
+            os.put(c < 128 ? static_cast<char>(c) : '?');
+        }
         template <typename T>
-        static typename std::enable_if<
-            !std::is_convertible<T, std::wstring>::value &&
-            !std::is_same<typename std::decay<T>::type, wchar_t*>::value &&
-            !std::is_same<typename std::decay<T>::type, const wchar_t*>::value &&
-            !std::is_same<typename std::decay<T>::type, std::string>::value &&
-            !std::is_same<typename std::decay<T>::type, const char*>::value &&
-            !std::is_same<typename std::decay<T>::type, char*>::value,
-            void
-        >::type
-            append_to_stream(std::ostringstream& oss, T&& arg)
-        {
-            oss << std::forward<T>(arg);
+        inline static void to_stream(std::ostream& os, const T& val) {
+            os << val;
         }
 
-        static inline void print_to_stream(std::ostringstream&) noexcept {}
-
-        template <typename First, typename... Rest>
-        static inline void print_to_stream(std::ostringstream& oss, First&& first, Rest&&... rest) {
-            append_to_stream(oss, std::forward<First>(first));
-            print_to_stream(oss, std::forward<Rest>(rest)...);
-        }
-
+        /* Compact, C++11 variadic debug logger */
         template <typename... Args>
-        static void debug_msg(Args&&... message) {
-            static std::unordered_set<std::string> printed_messages;
-
+        static void debug_msg(Args&&... args) {
+        #if defined(VMAWARE_DEBUG) && VMAWARE_DEBUG == 1
+            static std::unordered_set<std::string> seen;
             std::ostringstream oss;
-            print_to_stream(oss, std::forward<Args>(message)...);
+            oss << std::boolalpha;
+            int dummy[] = { 0, (to_stream(oss, args), 0)... };
+            VMAWARE_UNUSED(dummy);
 
-            std::string msg_content = oss.str();
-
-            if (printed_messages.find(msg_content) == printed_messages.end()) {
-            #if (VMAWARE_LINUX || VMAWARE_APPLE)
-                constexpr const char* black_bg = "\x1B[48;2;0;0;0m";
-                constexpr const char* bold = "\033[1m";
-                constexpr const char* blue = "\x1B[38;2;00;59;193m";
-                constexpr const char* ansiexit = "\x1B[0m";
-
-                std::cerr
-                    << black_bg
-                    << bold << "["
-                    << blue << "DEBUG"
-                    << ansiexit
-                    << bold << black_bg << "]"
-                    << ansiexit
-                    << " ";
-            #else
-                std::cerr << "[DEBUG] ";
-            #endif
-
-                std::cerr << msg_content << '\n';
-
-                printed_messages.insert(std::move(msg_content));
+            const std::string s = oss.str();
+            if (seen.insert(s).second) {
+                std::cerr << "[DEBUG] " << s << "\n";
             }
+        #else
+            (void)sizeof...(args);
+        #endif
         }
 
         [[nodiscard]] static std::unique_ptr<std::string> sys_result(const char* cmd) {
@@ -4905,7 +4849,7 @@ public:
 
         constexpr u32 simplevisor = 0x00766853; /* " vhS" */
 
-        vma_debug("CPUID_SIGNATURE: eax = ", std::hex, eax);
+        vma_debug("CPUID_SIGNATURE: eax = 0x", std::hex, eax);
 
         if (eax == simplevisor) {
             return core::add(brand_enum::SIMPLEVISOR);
@@ -14804,24 +14748,6 @@ public:
 
             return collector;
         }
-
-        template <typename... Args>
-        static void disabled_arg_handler(Args... args) {
-            static_assert(verify_flags<Args...>(), "disabled argument handler only accepts enum_flags variables");
-            static_assert(sizeof...(Args) > 0, "VM::DISABLE() must contain at least one flag");
-
-            flagset temp;
-            using expander = int[];
-            (void)expander {
-                0, (temp.set(static_cast<size_t>(args), true), 0)...
-            };
-
-            if (core::is_setting_flag_set(temp)) {
-                throw std::invalid_argument("VM::DISABLE() must not contain a settings flag, they are disabled by default anyway");
-            }
-
-            get_disabled_flag_collector() |= temp;
-        }
     };
 
     // START OF PUBLIC FUNCTIONS
@@ -15076,11 +15002,9 @@ public:
      */
     template <typename ...Args>
     static enum_flags DISABLE(const Args ...args) {
-        /*
-         * Basically core::arg_handler but in reverse,
-         * it'll clear the bits of the provided flags
-         */
-        core::disabled_arg_handler(args...);
+        auto& disabled = core::get_disabled_flag_collector();
+        int dummy[] = { 0, (disabled.set(static_cast<std::size_t>(args)), 0)... };
+        VMAWARE_UNUSED(dummy);
         return VM::NULL_ARG;
     }
 
