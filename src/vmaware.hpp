@@ -1159,19 +1159,19 @@ public:
         }
 
         [[nodiscard]] static const char* get_brand() {
-            if (VMAWARE_LIKELY(memo::cpu_brand::is_cached())) {
-                return memo::cpu_brand::fetch();
-            }
-
         #if (!VMAWARE_X86 || VMAWARE_APPLE)
             return "Unknown";
         #else
+            static char brand_cache[49] = { 0 };
+            if (brand_cache[0] != '\0') {
+                return brand_cache;
+            }
+
             if (!cpu::is_leaf_supported(cpu::leaf::brand3)) {
                 return "Unknown";
             }
 
             u32 regs[12] = { 0 };
-
             cpu::cpuid(regs[0], regs[1], regs[2], regs[3], cpu::leaf::brand1);
             cpu::cpuid(regs[4], regs[5], regs[6], regs[7], cpu::leaf::brand2);
             cpu::cpuid(regs[8], regs[9], regs[10], regs[11], cpu::leaf::brand3);
@@ -1180,14 +1180,11 @@ public:
             std::memcpy(buffer, regs, sizeof(regs));
             buffer[48] = '\0';
 
-            /* left-trim only to handle stupid whitespaces before the brand string in ARM CPUs (Virtual CPUs) */
             const char* start_ptr = string::ltrim(buffer);
+            str_copy(brand_cache, start_ptr);
+            vma_debug("CPU: ", brand_cache);
 
-            memo::cpu_brand::store(start_ptr);
-            vma_debug("CPU: ", start_ptr);
-
-            /* Return pointer to the static cache, not the local stack buffer */
-            return memo::cpu_brand::fetch();
+            return brand_cache;
         #endif
         }
 
@@ -1435,232 +1432,6 @@ public:
         }
         dest[copy_len] = '\0';
     }
-
-    struct memo {
-        struct cpu_brand {
-            static void store(const char* s) noexcept {
-                str_copy(get_cache(), s);
-                get_cached_flag() = true;
-            }
-
-            static bool is_cached() noexcept {
-                return get_cached_flag();
-            }
-
-            static const char* fetch() noexcept {
-                return get_cache();
-            }
-
-        private:
-            using cache_t = char[128];
-
-            static cache_t& get_cache() noexcept {
-                static cache_t brand_cache = { 0 };
-                return brand_cache;
-            }
-
-            static bool& get_cached_flag() noexcept {
-                static bool cached = false;
-                return cached;
-            }
-        };
-
-        struct thread_count {
-            static u32 fetch() noexcept {
-                static const u32 hw = std::thread::hardware_concurrency();
-                static const u32 cached_count = (hw != 0) ? hw : 1;
-                return cached_count;
-            }
-        };
-
-        struct hyperx {
-            static hyperx_state fetch() noexcept {
-                return get_state();
-            }
-
-            static void store(const hyperx_state p_state) noexcept {
-                get_state() = p_state;
-                get_cached_flag() = true;
-            }
-
-            static bool is_cached() noexcept {
-                return get_cached_flag();
-            }
-
-        private:
-            static hyperx_state& get_state() noexcept {
-                static hyperx_state state = HYPERV_UNKNOWN;
-                return state;
-            }
-
-            static bool& get_cached_flag() noexcept {
-                static bool cached = false;
-                return cached;
-            }
-        };
-
-        struct leaf_entry {
-            u32 leaf;
-            bool value;
-            bool has_value;
-        };
-
-        struct leaf_cache {
-            static constexpr std::size_t CAPACITY = 128;
-
-            static bool fetch(u32 leaf, bool& out) noexcept {
-                auto& table = get_table();
-                const std::size_t cnt = get_count();
-                for (std::size_t i = 0; i < cnt; ++i) {
-                    if (table[i].has_value && table[i].leaf == leaf) {
-                        out = table[i].value;
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            static void store(u32 leaf, bool val) noexcept {
-                auto& table = get_table();
-                std::size_t& cnt = get_count();
-                std::size_t& next_index = get_next_index();
-
-                for (std::size_t i = 0; i < cnt; ++i) {
-                    if (table[i].has_value && table[i].leaf == leaf) {
-                        table[i].value = val;
-                        return;
-                    }
-                }
-
-                if (cnt < CAPACITY) {
-                    table[cnt] = { leaf, val, true };
-                    ++cnt;
-                    return;
-                }
-
-                table[next_index] = { leaf, val, true };
-                next_index = (next_index + 1) % CAPACITY;
-            }
-
-        private:
-            static std::array<leaf_entry, CAPACITY>& get_table() noexcept {
-                static std::array<leaf_entry, CAPACITY> table{};
-                return table;
-            }
-
-            static std::size_t& get_count() noexcept {
-                static std::size_t count = 0;
-                return count;
-            }
-
-            static std::size_t& get_next_index() noexcept {
-                static std::size_t next_index = 0;
-                return next_index;
-            }
-        };
-
-        struct bios_info {
-            using buffer_t = char[256];
-
-            /* Declared for unevaluated expressions like sizeof(memo::bios_info::manufacturer) */
-            static buffer_t manufacturer;
-            static buffer_t model;
-
-            static const char* fetch_manufacturer() noexcept {
-                return get_man();
-            }
-
-            static const char* fetch_model() noexcept {
-                return get_mod();
-            }
-
-            static void store_manufacturer(const char* VMAWARE_RESTRICT s) noexcept {
-                str_copy(get_man(), s);
-                get_cached_man() = true;
-            }
-
-            static void store_model(const char* VMAWARE_RESTRICT s) noexcept {
-                str_copy(get_mod(), s);
-                get_cached_mod() = true;
-            }
-
-            static bool is_cached() noexcept {
-                return get_cached_man() && get_cached_mod();
-            }
-
-        private:
-            static buffer_t& get_man() noexcept {
-                static buffer_t s_manufacturer = { 0 };
-                return s_manufacturer;
-            }
-
-            static buffer_t& get_mod() noexcept {
-                static buffer_t s_model = { 0 };
-                return s_model;
-            }
-
-            static bool& get_cached_man() noexcept {
-                static bool cached = false;
-                return cached;
-            }
-
-            static bool& get_cached_mod() noexcept {
-                static bool cached = false;
-                return cached;
-            }
-        };
-
-    #if (VMAWARE_WINDOWS)
-        struct module {
-            static HMODULE fetch_ntdll() noexcept {
-                return get_ntdll_handle();
-            }
-
-            static HMODULE fetch_kernel32() noexcept {
-                return get_kernel32_handle();
-            }
-
-            static void store_ntdll(const HMODULE ntdll) noexcept {
-                get_ntdll_handle() = ntdll;
-                get_ntdll_cached() = true;
-            }
-
-            static void store_kernel32(const HMODULE kernel32) noexcept {
-                get_kernel32_handle() = kernel32;
-                get_kernel32_cached() = true;
-            }
-
-            static bool is_ntdll_cached() noexcept {
-                return get_ntdll_cached();
-            }
-
-            static bool is_kernel32_cached() noexcept {
-                return get_kernel32_cached();
-            }
-
-        private:
-            static HMODULE& get_ntdll_handle() noexcept {
-                static HMODULE handle = nullptr;
-                return handle;
-            }
-
-            static HMODULE& get_kernel32_handle() noexcept {
-                static HMODULE handle = nullptr;
-                return handle;
-            }
-
-            static bool& get_ntdll_cached() noexcept {
-                static bool cached = false;
-                return cached;
-            }
-
-            static bool& get_kernel32_cached() noexcept {
-                static bool cached = false;
-                return cached;
-            }
-        };
-    #endif
-    };
 
 #if (VMAWARE_WINDOWS)
     /* Timing attacks helper functionalities */
@@ -2526,6 +2297,16 @@ public:
         }
 
         [[nodiscard]] static HMODULE get_module(const bool get_ntdll) noexcept {
+            static HMODULE s_ntdll = nullptr;
+            static HMODULE s_k32 = nullptr;
+
+            if (get_ntdll && s_ntdll != nullptr) {
+                return s_ntdll;
+            }
+            if (!get_ntdll && s_k32 != nullptr) {
+                return s_k32;
+            }
+
             struct custom_unicode_string {
                 unsigned short length;
                 unsigned short max_length;
@@ -2555,13 +2336,6 @@ public:
                 }*ldr;
             };
 
-            if (get_ntdll && memo::module::is_ntdll_cached()) {
-                return memo::module::fetch_ntdll();
-            }
-            else if (!get_ntdll && memo::module::is_kernel32_cached()) {
-                return memo::module::fetch_kernel32();
-            }
-
             custom_peb* peb = nullptr;
 
         #if (VMAWARE_X86_64)
@@ -2580,13 +2354,11 @@ public:
 
             if (!peb || !peb->ldr) {
                 HMODULE fallback = GetModuleHandleW(get_ntdll ? L"ntdll.dll" : L"kernel32.dll");
-                if (fallback) {
-                    if (get_ntdll) {
-                        memo::module::store_ntdll(fallback);
-                    }
-                    else {
-                        memo::module::store_kernel32(fallback);
-                    }
+                if (get_ntdll) {
+                    s_ntdll = fallback;
+                }
+                else {
+                    s_k32 = fallback;
                 }
                 return fallback;
             }
@@ -2620,45 +2392,38 @@ public:
                 const unsigned short len_chars = ent->base_name.length / sizeof(wchar_t);
                 const wchar_t* buf = ent->base_name.buffer;
 
-                if (!res_ntdll && ((len_chars == 9 && matches(buf, L"ntdll.dll", 9)) || (len_chars == 5 && matches(buf, L"ntdll", 5)))) {
+                if (!res_ntdll && !s_ntdll && ((len_chars == 9 && matches(buf, L"ntdll.dll", 9)) || (len_chars == 5 && matches(buf, L"ntdll", 5)))) {
                     res_ntdll = reinterpret_cast<HMODULE>(ent->dll_base);
                 }
-                else if (!res_k32 && ((len_chars == 12 && matches(buf, L"kernel32.dll", 12)) || (len_chars == 8 && matches(buf, L"kernel32", 8)))) {
+                else if (!res_k32 && !s_k32 && ((len_chars == 12 && matches(buf, L"kernel32.dll", 12)) || (len_chars == 8 && matches(buf, L"kernel32", 8)))) {
                     res_k32 = reinterpret_cast<HMODULE>(ent->dll_base);
                 }
 
-                /* Break early if we satisfied the requested target and have no uncached secondary target pending */
-                const bool ntdll_done = res_ntdll != nullptr || memo::module::is_ntdll_cached();
-                const bool k32_done = res_k32 != nullptr || memo::module::is_kernel32_cached();
+                const bool ntdll_done = (res_ntdll != nullptr || s_ntdll != nullptr);
+                const bool k32_done = (res_k32 != nullptr || s_k32 != nullptr);
                 if (get_ntdll ? (res_ntdll != nullptr && k32_done) : (res_k32 != nullptr && ntdll_done)) {
                     break;
                 }
             }
 
             if (res_ntdll) {
-                memo::module::store_ntdll(res_ntdll);
+                s_ntdll = res_ntdll;
             }
             if (res_k32) {
-                memo::module::store_kernel32(res_k32);
+                s_k32 = res_k32;
             }
 
             if (get_ntdll) {
-                if (!res_ntdll) {
-                    res_ntdll = GetModuleHandleW(L"ntdll.dll");
-                    if (res_ntdll) {
-                        memo::module::store_ntdll(res_ntdll);
-                    }
+                if (!s_ntdll) {
+                    s_ntdll = GetModuleHandleW(L"ntdll.dll");
                 }
-                return res_ntdll;
+                return s_ntdll;
             }
 
-            if (!res_k32) {
-                res_k32 = GetModuleHandleW(L"kernel32.dll");
-                if (res_k32) {
-                    memo::module::store_kernel32(res_k32);
-                }
+            if (!s_k32) {
+                s_k32 = GetModuleHandleW(L"kernel32.dll");
             }
-            return res_k32;
+            return s_k32;
         }
     };
 #endif
@@ -3314,8 +3079,11 @@ public:
         #if (!VMAWARE_WINDOWS)
             return HYPERV_UNKNOWN;
         #else
-            if (memo::hyperx::is_cached()) {
-                return memo::hyperx::fetch();
+            static hyperx_state cached_state = HYPERV_UNKNOWN;
+            static bool is_cached = false;
+
+            if (is_cached) {
+                return cached_state;
             }
 
             /* Check if hypervisor feature bit in CPUID Leaf 1, ECX bit 31 is enabled */
@@ -3826,7 +3594,8 @@ public:
             if (enlightenment_str && string::find(enlightenment_str, "KVM")) {
                 vma_debug("HYPER-X: Detected Hyper-V enlightenments");
                 core::add(brand_enum::QEMU_KVM_HYPERV);
-                memo::hyperx::store(HYPERV_ENLIGHTENMENT);
+                cached_state = HYPERV_ENLIGHTENMENT;
+                is_cached = true;
                 return HYPERV_ENLIGHTENMENT;
             }
 
@@ -3876,8 +3645,9 @@ public:
                 }
             }
 
-            memo::hyperx::store(state);
-            return state;
+            cached_state = state;
+            is_cached = true;
+            return cached_state;
         #endif
         }
 
@@ -3951,18 +3721,18 @@ public:
                 *out_model = "";
             }
 
-            if (memo::bios_info::is_cached()) {
-                const char* const man = memo::bios_info::fetch_manufacturer();
-                const char* const mod = memo::bios_info::fetch_model();
+            static char s_manufacturer[256] = { 0 };
+            static char s_model[256] = { 0 };
+            static bool s_cached = false;
 
+            if (s_cached) {
                 if (out_manufacturer) {
-                    *out_manufacturer = man;
+                    *out_manufacturer = s_manufacturer;
                 }
                 if (out_model) {
-                    *out_model = mod;
+                    *out_model = s_model;
                 }
-
-                return (man && man[0] != '\0') || (mod && mod[0] != '\0');
+                return (s_manufacturer[0] != '\0' || s_model[0] != '\0');
             }
 
             auto is_placeholder = [](const char* s) noexcept -> bool {
@@ -4024,9 +3794,8 @@ public:
                 return true;
             };
 
-            char man_tmp[sizeof(memo::bios_info::manufacturer)]{};
-            char model_tmp[sizeof(memo::bios_info::model)]{};
-
+            char man_tmp[256] = { 0 };
+            char model_tmp[256] = { 0 };
             bool got_any = false;
 
             /*
@@ -4037,16 +3806,16 @@ public:
              */
             if (read_reg_utf8(L"SystemManufacturer", man_tmp, sizeof(man_tmp)) &&
                 !is_placeholder(man_tmp)) {
-                memo::bios_info::store_manufacturer(man_tmp);
+                str_copy(s_manufacturer, man_tmp);
                 got_any = true;
             }
             else if (read_reg_utf8(L"BaseBoardManufacturer", man_tmp, sizeof(man_tmp)) &&
                 !is_placeholder(man_tmp)) {
-                memo::bios_info::store_manufacturer(man_tmp);
+                str_copy(s_manufacturer, man_tmp);
                 got_any = true;
             }
             else {
-                memo::bios_info::store_manufacturer("");
+                str_copy(s_manufacturer, man_tmp);
             }
 
             /*
@@ -4058,35 +3827,35 @@ public:
              */
             if (read_reg_utf8(L"SystemProductName", model_tmp, sizeof(model_tmp)) &&
                 !is_placeholder(model_tmp)) {
-                memo::bios_info::store_model(model_tmp);
+                str_copy(s_model, model_tmp);
                 got_any = true;
             }
             else if (read_reg_utf8(L"BaseBoardProduct", model_tmp, sizeof(model_tmp)) &&
                 !is_placeholder(model_tmp)) {
-                memo::bios_info::store_model(model_tmp);
+                str_copy(s_model, model_tmp);
                 got_any = true;
             }
             else if (read_reg_utf8(L"SystemSKU", model_tmp, sizeof(model_tmp)) &&
                 !is_placeholder(model_tmp)) {
-                memo::bios_info::store_model(model_tmp);
+                str_copy(s_model, model_tmp);
                 got_any = true;
             }
             else if (read_reg_utf8(L"BaseBoardVersion", model_tmp, sizeof(model_tmp)) &&
                 !is_placeholder(model_tmp)) {
-                memo::bios_info::store_model(model_tmp);
+                str_copy(s_model, model_tmp);
                 got_any = true;
             }
             else {
-                memo::bios_info::store_model("");
+                str_copy(s_model, model_tmp);
             }
 
+            s_cached = true;
             if (out_manufacturer) {
-                *out_manufacturer = memo::bios_info::fetch_manufacturer();
+                *out_manufacturer = s_manufacturer;
             }
             if (out_model) {
-                *out_model = memo::bios_info::fetch_model();
+                *out_model = s_model;
             }
-
             return got_any;
         }
     #endif
@@ -9000,15 +8769,17 @@ public:
      */
     VMAWARE_TECHNIQUE thread_count() {
     #if (VMAWARE_X86 && !VMAWARE_APPLE)
-        vma_debug("THREAD_COUNT: ", "threads = ", memo::thread_count::fetch());
+        static const u32 hw = std::thread::hardware_concurrency();
+        const u32 count = (hw != 0) ? hw : 1;
+
+        vma_debug("THREAD_COUNT: threads = ", count);
 
         const struct cpu::stepping_struct steps = cpu::fetch_steppings();
-
         if (cpu::is_celeron(steps)) {
             return false;
         }
 
-        return (memo::thread_count::fetch() <= 2);
+        return (count <= 2);
     #else 
         return false;
     #endif
