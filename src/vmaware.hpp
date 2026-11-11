@@ -2665,18 +2665,31 @@ public:
 
     /* String utilities */
     struct string {
-        /* Converts a single character to lowercase */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR char to_lower(char c) noexcept {
-            return (c >= 'A' && c <= 'Z') ? static_cast<char>(c | 0x20) : c;
+        static constexpr char to_lower(char c) noexcept {
+            return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
         }
 
-        /* Converts a single character to uppercase */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR char to_upper(char c) noexcept {
-            return (c >= 'a' && c <= 'z') ? static_cast<char>(c & 0xDF) : c;
+        static constexpr char to_upper(char c) noexcept {
+            return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c;
         }
 
-        /* Checks if a string starts with a specific prefix (case-sensitive) */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR_20 bool starts_with(const char* str, const char* prefix) noexcept {
+        static constexpr bool is_space(char c) noexcept {
+            return c == ' ' || (c >= '\t' && c <= '\r');
+        }
+
+        static constexpr bool is_digit(char c) noexcept {
+            return c >= '0' && c <= '9';
+        }
+
+        static constexpr bool is_hex(char c) noexcept {
+            return is_digit(c) || (to_lower(c) >= 'a' && to_lower(c) <= 'f');
+        }
+
+        static constexpr bool is_alnum(char c) noexcept {
+            return is_digit(c) || (to_lower(c) >= 'a' && to_lower(c) <= 'z');
+        }
+
+        static VMAWARE_CONSTEXPR bool starts_with(const char* str, const char* prefix) noexcept {
             if (!str || !prefix) {
                 return false;
             }
@@ -2690,8 +2703,7 @@ public:
             return true;
         }
 
-        /* Finds a substring inside a null-terminated string (case-sensitive) */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR_20 const char* find(const char* haystack, const char* needle) noexcept {
+        static VMAWARE_CONSTEXPR const char* find(const char* haystack, const char* needle) noexcept {
             if (!haystack || !needle) {
                 return nullptr;
             }
@@ -2703,8 +2715,8 @@ public:
                     const char* h = haystack;
                     const char* n = needle;
                     while (*h && *n && *h == *n) {
-                        h++;
-                        n++;
+                        ++h;
+                        ++n;
                     }
                     if (!*n) {
                         return haystack;
@@ -2714,22 +2726,20 @@ public:
             return nullptr;
         }
 
-        /* Finds a substring inside a null-terminated string (case-insensitive) */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR_20 const char* find_ci(const char* haystack, const char* needle) noexcept {
+        static VMAWARE_CONSTEXPR const char* find_ci(const char* haystack, const char* needle) noexcept {
             if (!haystack || !needle) {
                 return nullptr;
             }
             if (!*needle) {
                 return haystack;
             }
-            const char n0_lower = to_lower(*needle);
             for (; *haystack; ++haystack) {
-                if (to_lower(*haystack) == n0_lower) {
+                if (to_lower(*haystack) == to_lower(*needle)) {
                     const char* h = haystack;
                     const char* n = needle;
                     while (*h && *n && to_lower(*h) == to_lower(*n)) {
-                        h++;
-                        n++;
+                        ++h;
+                        ++n;
                     }
                     if (!*n) {
                         return haystack;
@@ -2739,114 +2749,69 @@ public:
             return nullptr;
         }
 
-        /* Checks if a std::string contains a substring (case-sensitive) */
-        static VMAWARE_FORCE_INLINE bool contains(const std::string& base_str, const char* keyword) noexcept {
+        static bool contains(const std::string& base_str, const char* keyword) noexcept {
             if (!keyword) {
                 return false;
             }
             return base_str.find(keyword) != std::string::npos;
         }
 
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR_20 bool contains_ci(const char* haystack, const char* needle) noexcept {
-            if (!haystack || !needle) {
-                return false;
-            }
-            if (!*needle) {
-                return true;
-            }
-            const char n0_lower = to_lower(*needle);
-            for (; *haystack; ++haystack) {
-                if (to_lower(*haystack) == n0_lower) {
-                    const char* h = haystack;
-                    const char* n = needle;
-                    while (*h && *n && to_lower(*h) == to_lower(*n)) {
-                        h++;
-                        n++;
-                    }
-                    if (!*n) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+        static VMAWARE_CONSTEXPR bool contains_ci(const char* haystack, const char* needle) noexcept {
+            return find_ci(haystack, needle) != nullptr;
         }
 
-        /* Compares two null-terminated strings for equality (case-insensitive) */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR_20 bool equals_ci(const char* s1, const char* s2) noexcept {
+        static VMAWARE_CONSTEXPR bool equals_ci(const char* s1, const char* s2) noexcept {
             if (!s1 || !s2) {
                 return s1 == s2;
             }
             while (*s1 && *s2) {
-                if (to_lower(static_cast<unsigned char>(*s1)) != to_lower(static_cast<unsigned char>(*s2))) {
+                if (to_lower(*s1) != to_lower(*s2)) {
                     return false;
                 }
-                s1++;
-                s2++;
+                ++s1;
+                ++s2;
             }
             return *s1 == *s2;
         }
 
-        /* Converts a std::string to lowercase in place */
-        static VMAWARE_FORCE_INLINE void to_lower_inplace(std::string& str) noexcept {
-            const size_t len = str.length();
-            for (size_t i = 0; i < len; ++i) {
-                str[i] = to_lower(str[i]);
+        static void to_lower_inplace(std::string& str) noexcept {
+            for (char& c : str) {
+                c = to_lower(c);
             }
         }
 
-        /* Trims leading and trailing whitespaces from a std::string in place */
-        static VMAWARE_FORCE_INLINE void trim_inplace(std::string& s) noexcept {
-            while (!s.empty() && is_space(s.front())) {
-                s.erase(s.begin());
+        static void trim_inplace(std::string& s) noexcept {
+            size_t start = 0;
+            while (start < s.size() && is_space(s[start])) {
+                ++start;
             }
-            while (!s.empty() && is_space(s.back())) {
-                s.pop_back();
+            size_t end = s.size();
+            while (end > start && is_space(s[end - 1])) {
+                --end;
             }
+            s = s.substr(start, end - start);
         }
 
-        /* Trims leading whitespaces from a null-terminated string pointer */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR_20 const char* ltrim(const char* str) noexcept {
+        static VMAWARE_CONSTEXPR const char* ltrim(const char* str) noexcept {
             if (!str) {
                 return nullptr;
             }
             while (*str && is_space(*str)) {
-                str++;
+                ++str;
             }
             return str;
         }
 
-        /* Checks if a std::string consists only of numerical digits */
-        static VMAWARE_FORCE_INLINE bool is_numeric(const std::string& s) noexcept {
+        static bool is_numeric(const std::string& s) noexcept {
             if (s.empty()) {
                 return false;
             }
-            const size_t len = s.length();
-            for (size_t i = 0; i < len; ++i) {
-                if (!is_digit(s[i])) {
+            for (char c : s) {
+                if (!is_digit(c)) {
                     return false;
                 }
             }
             return true;
-        }
-
-        /* Helper to check for ASCII spaces (avoids locale overhead) */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR bool is_space(char c) noexcept {
-            return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
-        }
-
-        /* Helper to check for ASCII digits */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR bool is_digit(char c) noexcept {
-            return c >= '0' && c <= '9';
-        }
-
-        /* Helper to check for hexadecimal characters */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR bool is_hex(char c) noexcept {
-            return (c >= '0' && c <= '9') || (to_lower(c) >= 'a' && to_lower(c) <= 'f');
-        }
-
-        /* Helper to check if a character is alphanumeric */
-        static VMAWARE_FORCE_INLINE VMAWARE_CONSTEXPR bool is_alnum(char c) noexcept {
-            return (to_lower(c) >= 'a' && to_lower(c) <= 'z') || is_digit(c);
         }
     };
 
