@@ -3082,7 +3082,7 @@ public:
             static std::unordered_set<std::string> seen;
             std::ostringstream oss;
             oss << std::boolalpha;
-            int dummy[] = { 0, (to_stream(oss, args), 0)... };
+            const int dummy[] = { 0, (to_stream(oss, args), 0)... };
             VMAWARE_UNUSED(dummy);
 
             const std::string s = oss.str();
@@ -14655,47 +14655,14 @@ public:
         }
 
         template <typename... Args>
-        static constexpr typename std::enable_if<sizeof...(Args) == 0, bool>::type
-            verify_flags() noexcept {
-            return true;
-        }
-
-        template <typename T, typename... Args>
-        static constexpr bool verify_flags() noexcept {
-            return std::is_same<typename std::decay<T>::type, enum_flags>::value&& verify_flags<Args...>();
-        }
-
-        static flagset arg_handler() noexcept {
+        static flagset arg_handler(Args... args) {
             flagset collector;
-            generate_default(collector);
-            collector &= ~get_disabled_flag_collector();
-            get_disabled_flag_collector().reset();
-            return collector;
-        }
+            const int dummy[] = { 0, (collector.set(static_cast<std::size_t>(args)), 0)... };
+            VMAWARE_UNUSED(dummy);
 
-        template <typename flagset_type>
-        static inline void populate_flagset(flagset_type&) noexcept {}
-
-        template <typename flagset_type, typename head_type, typename... tail_types>
-        static inline void populate_flagset(flagset_type& collector, head_type head, tail_types... tail) {
-            collector.set(static_cast<std::size_t>(head), true);
-            populate_flagset(collector, tail...);
-        }
-
-        template <typename T, typename... Args>
-        static VMAWARE_CONSTEXPR flagset arg_handler(T first, Args... args) {
-            static_assert(verify_flags<T, Args...>(), "argument handler only accepts enum_flags variables");
-
-            flagset collector;
-            populate_flagset(collector, first, args...);
-
-            if (collector.test(DEFAULT)) {
+            if (collector.test(DEFAULT) || are_techniques_empty(collector)) {
                 collector |= generate_default();
                 collector.reset(DEFAULT);
-            }
-
-            if (are_techniques_empty(collector)) {
-                collector |= generate_default();
             }
 
             if (collector.test(ALL)) {
@@ -14968,7 +14935,7 @@ public:
     template <typename ...Args>
     static enum_flags DISABLE(const Args ...args) {
         auto& disabled = core::get_disabled_flag_collector();
-        int dummy[] = { 0, (disabled.set(static_cast<std::size_t>(args)), 0)... };
+        const int dummy[] = { 0, (disabled.set(static_cast<std::size_t>(args)), 0)... };
         VMAWARE_UNUSED(dummy);
         return VM::NULL_ARG;
     }
