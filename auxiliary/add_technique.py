@@ -1,46 +1,13 @@
-# 
-# ██╗   ██╗███╗   ███╗ █████╗ ██╗    ██╗ █████╗ ██████╗ ███████╗
-# ██║   ██║████╗ ████║██╔══██╗██║    ██║██╔══██╗██╔══██╗██╔════╝
-# ██║   ██║██╔████╔██║███████║██║ █╗ ██║███████║██████╔╝█████╗  
-# ╚██╗ ██╔╝██║╚██╔╝██║██╔══██║██║███╗██║██╔══██║██╔══██╗██╔══╝  
-#  ╚████╔╝ ██║ ╚═╝ ██║██║  ██║╚███╔███╔╝██║  ██║██║  ██║███████╗
-#   ╚═══╝  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝
-# 
-#  C++ VM detection library
-# 
-# ===============================================================
-# 
-#  This is an internal script to automatically add a technique to
-#  the lib with many aspects of the lib updated based on user input.
-#  
-#  the updated components are:
-#   - documentation
-#   - technique table 
-#   - CLI checklist
-#   - technique enums
-#   - flag_to_string()
-#   - <os>_technique lambda functionality in CLI
-#   - adding the technique itself in vmaware.hpp
-# 
-# ===============================================================
-# 
-#  - Made by: @kernelwernel (https://github.com/kernelwernel)
-#  - Repository: https://github.com/NotRequiem/VMAware
-#  - License: MIT
-
 import questionary
 import sys
+import os
+
+is_dev_mode = len(sys.argv) > 1 and sys.argv[1] == "--dev"
+tab = "    "
 
 
-is_dev_mode = False
-
-if len(sys.argv) != 1:
-    if sys.argv[1] == "--dev":
-        is_dev_mode = True
-
-
-class options:
-    def __init__(self, enum_name, file_path, function_name, cross_platform, is_linux, is_win, is_mac, score, short_description, description, author, link, is_admin, is_gpl, only_32_bit, is_x86_only, notes):
+class Options:
+    def __init__(self, enum_name, file_path, function_name, cross_platform, is_linux, is_win, is_mac, score, short_description, description, author, link, is_admin, only_32_bit, is_x86_only, notes):
         self.enum_name = enum_name
         self.file_path = file_path
         self.function_name = function_name
@@ -54,68 +21,55 @@ class options:
         self.author = author
         self.link = link
         self.is_admin = is_admin
-        self.is_gpl = is_gpl
         self.only_32_bit = only_32_bit
         self.is_x86_only = is_x86_only
         self.notes = notes
 
 
-# there's like some really weird shit going on with \t, so i'm doing it manually
-tab = "    "
-
-
 def prompt():
-    # 1: enum name
-    enum_answer = ""
+    # 1: Enum name
     if is_dev_mode:
         enum_answer = "TEST"
     else:
-        enum_answer = questionary.text("What's the name of the enum? (i.e. VBOX_REG or HYPERVISOR_STR)").ask()
-        enum_answer = enum_answer.upper()
+        enum_answer = questionary.text("What's the name of the enum? (e.g. VBOX_REG or HYPERVISOR_STR)").ask()
+        enum_answer = enum_answer.upper().strip()
 
-
-    # 2: technique file
-    file_path = ""
+    # 2: Technique file
     if is_dev_mode:
         file_path = "../archive/techniques/test.cpp"
     else:
         while True:
             file_path = questionary.path("What's the path to the technique file?").ask()
-            if not file_path.endswith(".cpp") and not file_path.endswith(".cc"):
-                print("file input MUST be a .cpp file")
+            if not file_path.endswith((".cpp", ".cc")):
+                print("File input must be a .cpp or .cc file.")
                 continue
 
-            with open(file_path, 'r') as file:
-                is_static = False
+            with open(file_path, 'r', encoding='utf-8') as file:
+                has_valid_specifier = False
+                has_include = False
                 for line in file:
                     if "#include" in line.lower():
-                        print("The cpp file will be directly copied to the lib verbatim, so do not add #include as this will mess up include orders.")
-                        continue
+                        has_include = True
+                    if "VMAWARE_TECHNIQUE" in line or "static" in line:
+                        has_valid_specifier = True
 
-                    if "static" in line:
-                        is_static = True
-                
-                if not is_static:
-                    print("The function must be set as static")
+                if has_include:
+                    print("Do not include #include headers in the snippet file; it will be directly pasted into the header.")
                     continue
 
+                if not has_valid_specifier:
+                    print("The function must be declared with VMAWARE_TECHNIQUE (or static).")
+                    continue
                 break
 
-
-    # 3: function name
-    function_name = ""
+    # 3: Function name
     if is_dev_mode:
         function_name = "test"
     else:
-        function_name = questionary.text("What's the name of the function in your .cpp file? example: new_technique()").ask()
-        function_name = function_name.lower()
-        if "(" in function_name or ")" in function_name:
-            function_name = function_name.replace("(", "").replace(")", "")
+        function_name = questionary.text("What's the name of the function in your file? (e.g. new_technique())").ask()
+        function_name = function_name.lower().replace("(", "").replace(")", "").strip()
 
-
-    # 4: is it cross-platform?
-    cross_platform = False
-
+    # 4: Platform support
     if is_dev_mode:
         cross_platform = False
         is_linux = True
@@ -123,21 +77,13 @@ def prompt():
         is_mac = False
     else:
         cross_platform = questionary.confirm("Is it cross-platform?").ask()
-        is_linux = False
-        is_win = False
-        is_mac = False
-        if cross_platform == True:
-            is_linux = True
-            is_win = True
-            is_mac = True
+        is_linux, is_win, is_mac = False, False, False
+        if cross_platform:
+            is_linux, is_win, is_mac = True, True, True
         else:
             choices = questionary.checkbox(
                 "Which OS does this technique support?",
-                choices=[
-                    "Linux",
-                    "Windows",
-                    "MacOS"
-                ]
+                choices=["Linux", "Windows", "MacOS"]
             ).ask()
             if "Linux" in choices:
                 is_linux = True
@@ -145,119 +91,49 @@ def prompt():
                 is_win = True
             if "MacOS" in choices:
                 is_mac = True
-    
 
-    # 5: certainty score
+    # 5: Score (0 - 300)
     if is_dev_mode:
         score = 50
     else:
-        certainty = ""
         while True:
-            certainty = questionary.text("What's the score of your technique? (0-100)").ask()
-            if certainty == "":
-                print("A score is mandatory, try again")
-                continue
-            
-            if 0 <= int(certainty) <= 100:
+            certainty = questionary.text("What's the score of your technique? (0-300)").ask()
+            if certainty.isdigit() and 0 <= int(certainty) <= 300:
+                score = int(certainty)
                 break
-            else:
-                print("Score must be between 0 and 100, try again")
-                continue
+            print("Score must be a number between 0 and 300, try again.")
 
-        score = int(certainty)
-        
-
-
-    # 6: description
-    description = ""
+    # 6: Description
     if is_dev_mode:
         description = "testing, this is a boilerplate technique"
     else:
         while True:
             text = questionary.text("What's the description of your technique? (30-100 characters)").ask()
-            if len(text) < 30:
-                print("Too short, try again\n")
-                continue
-            if len(text) > 100:
-                print("Too long, try again\n")
-                continue
-            description = text
-            break
+            if 30 <= len(text) <= 100:
+                description = text
+                break
+            print("Description must be between 30 and 100 characters.\n")
 
-    # 7: short description
-    short_description = ""
+    # 7: Short description
     if is_dev_mode:
         short_description = "testing, ignore"
     else:
         while True:
-            text = questionary.text("What is your technique checking for? This will appear in the CLI, so be as minimal as you can (max 25 characters)").ask()
-            if len(text) > 25:
-                print("Too long, try again\n")
-                continue
-            if len(text) > len(description):
-                print("The answer cannot be longer than the actual description from the previous question\n")
-                continue
-            short_description = text
-            break
+            text = questionary.text("What is your technique checking for? (CLI display, max 25 chars)").ask()
+            if len(text) <= 25 and len(text) <= len(description):
+                short_description = text
+                break
+            print("Short description must be <= 25 characters and shorter than the main description.\n")
 
+    # 8-12: Optional metadata
+    author = "" if is_dev_mode else questionary.text("Author name (optional):").ask()
+    link = "" if is_dev_mode else questionary.text("Source/origin link (optional):").ask()
+    is_admin = False if is_dev_mode else questionary.confirm("Requires admin/root privileges?").ask()
+    only_32_bit = False if is_dev_mode else questionary.confirm("Is it 32-bit only?").ask()
+    is_x86 = True if is_dev_mode else questionary.confirm("Is it x86-only? (no ARM support)").ask()
+    notes = "" if is_dev_mode else questionary.text("Extra notes (optional):").ask()
 
-    # 8: author
-    author = ""
-    if is_dev_mode:
-        author = ""
-    else:
-        author = questionary.text("Who is the author? (optional, can be left empty)").ask()
-
-
-    # 9: link
-    link = ""
-    if is_dev_mode:
-        link = ""
-    else:
-        link = questionary.text("If there's a source for the technique's origin, paste the link here (optional, can be left empty)").ask()
-
-
-    # 10: permissions
-    is_admin = False
-    if is_dev_mode:
-        is_admin = False
-    else:
-        is_admin = questionary.confirm("Does it require admin permissions?").ask()
-
-
-    # 11: GPL
-    is_gpl = False
-    if is_dev_mode:
-        is_gpl = True
-    else:
-        is_gpl = questionary.confirm("Is it GPL?").ask()
-
-
-    # 12: 32-bit
-    only_32_bit = False
-    if is_dev_mode:
-        only_32_bit = False
-    else:
-        only_32_bit = questionary.confirm("Is it 32-bit only? (no support for 64-bit systems)").ask()
-
-
-    # 13: x86
-    is_x86 = False
-    if is_dev_mode:
-        is_x86 = True
-    else:
-        is_x86 = questionary.confirm("Is it x86 only? (no support for ARM for example)").ask()
-
-
-    # 14: notes
-    notes = ""
-    if is_dev_mode:
-        notes = ""
-    else:
-        notes = questionary.text("Are there any extra notes you want to add? (leave this empty if it's unnecessary)").ask()
-
-
-    return options(
+    return Options(
         enum_answer,
         file_path,
         function_name,
@@ -271,7 +147,6 @@ def prompt():
         author,
         link,
         is_admin,
-        is_gpl,
         only_32_bit,
         is_x86,
         notes
@@ -279,283 +154,182 @@ def prompt():
 
 
 def write_header(options, header_file):
-    with open(header_file, 'r') as file:
+    if not os.path.exists(header_file):
+        print(f"Error: {header_file} does not exist.")
+        return
+
+    with open(header_file, 'r', encoding='utf-8') as file:
         lines = file.readlines()
 
     new_code = []
-    update_count = 0
 
-    if options.is_gpl and header_file == "../src/vmaware_MIT.hpp":
-        return
+    # Check which marker comments currently exist in the header
+    has_enum_marker = any("// ADD NEW TECHNIQUE ENUM NAME HERE" in l for l in lines)
+    has_func_marker = any("// ADD NEW TECHNIQUE FUNCTION HERE" in l for l in lines)
+    has_table_marker = any("// END OF TECHNIQUE TABLE" in l or "// ADD NEW TECHNIQUE TO TABLE" in l for l in lines)
+    has_case_marker = any("// ADD NEW CASE HERE" in l for l in lines)
+
+    # Technique function comments (all using // comments)
+    technique_details = ["// @brief " + options.description]
+    if options.author:
+        technique_details.append("// @author " + options.author)
+    if options.link:
+        technique_details.append("// @link " + options.link)
+
+    category_list = []
+    if options.cross_platform:
+        if options.is_x86_only:
+            category_list.append("x86")
+    else:
+        if options.is_linux:
+            category_list.append("Linux")
+        if options.is_win:
+            category_list.append("Windows")
+        if options.is_mac:
+            category_list.append("MacOS")
+    if category_list:
+        technique_details.append("// @category " + ", ".join(category_list))
+
+    if options.notes:
+        technique_details.append("// @note " + options.notes)
+    technique_details.append("// @implements VM::" + options.enum_name)
+
+    # Read and normalize the snippet code to use VMAWARE_TECHNIQUE
+    with open(options.file_path, 'r', encoding='utf-8') as tf:
+        technique_code = tf.readlines()
+
+    for idx, t_line in enumerate(technique_code):
+        if "[[nodiscard]] static vmaware_technique" in t_line:
+            technique_code[idx] = t_line.replace("[[nodiscard]] static vmaware_technique", "VMAWARE_TECHNIQUE")
+        elif "static vmaware_technique" in t_line and "VMAWARE_TECHNIQUE" not in t_line:
+            technique_code[idx] = t_line.replace("static vmaware_technique", "VMAWARE_TECHNIQUE")
+
+    # Format the complete technique block
+    technique_block = ["\n"] + [c + "\n" for c in technique_details]
+    preprocessors = ["#endif", "#elif", "#else", "#if"]
+    for t_line in technique_code:
+        if any(sub in t_line for sub in preprocessors):
+            technique_block.append(t_line.lstrip())
+        else:
+            technique_block.append(tab + t_line)
+    technique_block.append("\n\n")
+
+    # Table entry string
+    table_entry_str = tab + tab + f"{{ VM::{options.enum_name}, {{ {options.score}, VM::{options.function_name} }} }},\n"
+    case_str = tab + tab + tab + f'case {options.enum_name}: return "{options.enum_name}";\n'
+
+    in_get_technique_table = False
+    in_entries_array = False
+    table_entry_inserted = False
+    func_inserted = False
+    enum_inserted = False
+    case_inserted = False
 
     for line in lines:
-        # if the line is empty, skip
-        if not line:
-            new_code.append(line)
-            continue
+        # 1. Enum insertion
+        if has_enum_marker and "// ADD NEW TECHNIQUE ENUM NAME HERE" in line and not enum_inserted:
+            new_code.append(tab + tab + options.enum_name + ",\n")
+            enum_inserted = True
+        elif not has_enum_marker and "DEFAULT," in line and not enum_inserted:
+            new_code.append(tab + tab + options.enum_name + ",\n")
+            enum_inserted = True
 
+        # 2. Function definition insertion
+        if has_func_marker and "// ADD NEW TECHNIQUE FUNCTION HERE" in line and not func_inserted:
+            new_code.extend(technique_block)
+            func_inserted = True
+        elif not has_func_marker and "struct core {" in line and not func_inserted:
+            new_code.extend(technique_block)
+            func_inserted = True
 
-        # modify the enum
-        if "// ADD NEW TECHNIQUE ENUM NAME HERE" in line:
-            if options.is_gpl:
-                new_code.append("/* GPL */ " + options.enum_name + ",\n")
-            else:
-                new_code.append(tab + tab + options.enum_name + ",\n")
-            update_count += 1
+        # Track location inside get_technique_table()
+        if "get_technique_table()" in line:
+            in_get_technique_table = True
+        if in_get_technique_table and "entries[]" in line:
+            in_entries_array = True
 
+        # 3. Technique table entry insertion
+        if has_table_marker and any(m in line for m in ["// END OF TECHNIQUE TABLE", "// ADD NEW TECHNIQUE TO TABLE"]) and not table_entry_inserted:
+            new_code.append(table_entry_str)
+            table_entry_inserted = True
+        elif not has_table_marker and in_entries_array and "};" in line and not table_entry_inserted:
+            new_code.append(table_entry_str)
+            table_entry_inserted = True
+            in_entries_array = False
+            in_get_technique_table = False
 
-        # append the technique function to the function list section
-        if "// ADD NEW TECHNIQUE FUNCTION HERE" in line:
-            full_technique = []
-            new_code.append("\n")
+        # 4. flag_to_string() case insertion
+        if has_case_marker and "// ADD NEW CASE HERE" in line and not case_inserted:
+            new_code.append(case_str)
+            case_inserted = True
+        elif not has_case_marker and "case DEFAULT:" in line and not case_inserted:
+            new_code.append(case_str)
+            case_inserted = True
 
-            # manage the category string of the technique
-            category_list = []
-            if options.cross_platform:
-                if options.is_x86_only:
-                    category_list.append("x86")
-            else:
-                if options.is_linux:
-                    category_list.append("Linux")
-                if options.is_win:
-                    category_list.append("Windows")
-                if options.is_mac:
-                    category_list.append("MacOS")
-            category_str = ", ".join(category_list)
-
-            # manage the basic details of the technique
-            technique_details = []
-            technique_details.append("@brief " + options.description)
-            if options.author:
-                technique_details.append("@author " + options.author)
-            if options.link:
-                technique_details.append("@link " + options.link)
-            
-            technique_details.append("@category " + category_str)
-
-            if options.notes != "":
-                technique_details.append("@note " + options.notes)
-
-            if options.is_gpl:
-                technique_details.append("@copyright GPL-3.0")
-
-            technique_details.append("@implements VM::" + options.enum_name)
-            
-            # modify the technique details prefix comments 
-            # depending on whether it's GPL or not
-            if options.is_gpl:
-                for comment in technique_details:
-                    full_technique.append("// " + comment + "\n")
-            else:
-                full_technique.append("/**\n")
-                for comment in technique_details:
-                    full_technique.append(" * " + comment + "\n")
-                full_technique.append(" */\n")
-
-            # read the whole technique code
-            with open(options.file_path, 'r') as technique_file:
-                technique_code = technique_file.readlines()
-                full_technique = full_technique + technique_code
-
-            
-
-            # add the GPL specifier for every line 
-            if options.is_gpl:
-                for i in range(len(full_technique)):
-                    full_technique[i] = "/* GPL */     " + full_technique[i]
-
-            # commit the full technique in the buffer 
-            preprocessors = ["#endif", "#elif", "#else", "#if"]
-            if options.is_gpl:
-                for technique_line in full_technique:
-                    if all(sub in technique_line for sub in preprocessors):
-                        new_code.append(technique_line.lstrip())
-                    else:
-                        new_code.append(technique_line)
-            else:
-                for technique_line in full_technique:
-                    if all(sub in technique_line for sub in preprocessors):
-                        new_code.append(technique_line.lstrip())
-                    else:
-                        new_code.append(tab + technique_line)
-
-
-            # extra lines
-            new_code.append("\n\n")
-            update_count += 1
-
-
-        # modify the technique table with the new technique appended
-        if "// END OF TECHNIQUE TABLE" in line:
-            code_str = (
-                "std::make_pair(VM::" + 
-                options.enum_name + 
-                ", VM::core::technique(" + 
-                str(options.score) + 
-                ", VM::" + 
-                options.function_name +
-                ")),\n"
-            )
-
-            if options.is_gpl:
-                new_code.append("/* GPL */ " + code_str)
-            else:
-                new_code.append(tab + code_str)
-
-            update_count += 1
-
-
-        # modify the VM::flag_to_string function with the new technique
-        if "// ADD NEW CASE HERE FOR NEW TECHNIQUE" in line:
-            new_code.append(
-                tab + tab + tab +
-                "case " + 
-                options.enum_name + 
-                ": return \"" + 
-                options.enum_name + 
-                "\";\n"
-            )
-            update_count += 1
-
-        # add the line in the buffer array
         new_code.append(line)
 
-    if update_count != 4:
-        raise ValueError("Not all sections have been update, try to check if the search key values have been modified")
-
-
-    # commit the new changes from the buffer array
-    with open(header_file, "w") as file:
-        for line in new_code:
-            file.write(line)
-
-
+    with open(header_file, "w", encoding='utf-8') as file:
+        file.writelines(new_code)
+    print(f"Updated {header_file}")
 
 
 def write_cli(options):
-    with open('../src/cli.cpp', 'r') as file:
+    cli_path = '../src/cli.cpp'
+    if not os.path.exists(cli_path):
+        return
+
+    with open(cli_path, 'r', encoding='utf-8') as file:
         lines = file.readlines()
 
     new_code = []
 
     for line in lines:
-        # if the line is empty, skip
-        if not line:
-            new_code.append(line)
-            continue
+        if "// ADD NEW TECHNIQUE CHECKER" in line:
+            new_code.append(tab + f'checker(VM::{options.enum_name}, "{options.short_description}");\n')
 
-        # modify the checklist with the newly appended technique here
-        if "// ADD NEW TECHNIQUE CHECKER HERE" in line:
-            new_code.append(
-                tab +
-                "checker(VM::" + 
-                options.enum_name + 
-                ", \"" + 
-                options.short_description +
-                "\");\n"
-            )
+        if "// ADD LINUX FLAG" in line and options.is_linux:
+            new_code.append(tab + tab + tab + f"case VM::{options.enum_name}:\n")
 
-        if "// ADD LINUX FLAG" in line:
-            if options.is_linux:
-                new_code.append(tab + tab + tab + "case VM::" + options.enum_name + ":\n")
+        if "// ADD WINDOWS FLAG" in line and options.is_win:
+            new_code.append(tab + tab + tab + f"case VM::{options.enum_name}:\n")
 
-        if "// ADD WINDOWS FLAG" in line:
-            if options.is_win:
-                new_code.append(tab + tab + tab + "case VM::" + options.enum_name + ":\n")
+        if "// ADD MACOS FLAG" in line and options.is_mac:
+            new_code.append(tab + tab + tab + f"case VM::{options.enum_name}:\n")
 
-        if "// ADD MACOS FLAG" in line:
-            if options.is_mac:
-                new_code.append(tab + tab + tab + "case VM::" + options.enum_name + ":\n")
-
-        # add the line in the buffer array
         new_code.append(line)
 
-
-    # commit the new changes from the buffer array
-    with open("../src/cli.cpp", "w") as file:
-        for line in new_code:
-            file.write(line)
-
-
+    with open(cli_path, "w", encoding='utf-8') as file:
+        file.writelines(new_code)
+    print("Updated CLI (../src/cli.cpp)")
 
 
 def write_docs(options):
-    with open('../docs/documentation.md', 'r') as file:
+    doc_path = '../docs/documentation.md'
+    if not os.path.exists(doc_path):
+        return
+
+    with open(doc_path, 'r', encoding='utf-8') as file:
         lines = file.readlines()
 
     new_docs = []
     updated = False
 
-    for line in lines:
-        # if the line is empty, skip
-        if not line:
-            new_code.append(line)
-            continue
+    # Build platform string
+    if options.cross_platform:
+        platform_icons = "🐧🪟🍏"
+    else:
+        icons = []
+        if options.is_linux:
+            icons.append("🐧")
+        if options.is_win:
+            icons.append("🪟")
+        if options.is_mac:
+            icons.append("🍏")
+        platform_icons = "".join(icons)
 
-        if "<!-- ADD TECHNIQUE DETAILS HERE -->" in line:
-            query_list = []
-
-            query_list.append("`VM::" + options.enum_name + "`")
-            query_list.append(options.description)
-            
-            if options.cross_platform:
-                query_list.append("🐧🪟🍏")
-            else:
-                category_list = []
-                if options.is_linux:
-                    category_list.append("🐧")
-                if options.is_win:
-                    category_list.append("🪟")
-                if options.is_mac:
-                    category_list.append("🍏")
-                category_str = "".join(category_list)
-                query_list.append(category_str)
-            
-            query_list.append(str(options.score) + "%")
-
-            if options.is_admin:
-                query_list.append("Admin")
-            else:
-                query_list.append("")
-
-            if options.is_gpl:
-                query_list.append("GPL")
-            else:
-                query_list.append("")
-
-            if options.only_32_bit:
-                query_list.append("32-bit")
-            else:
-                query_list.append("")
-
-            if options.notes:
-                query_list.append(options.notes)
-            else:
-                query_list.append("")
-
-            query = "| " + " | ".join(query_list) + " |  |" # last part is meant to be the link, todo
-
-            new_docs.append(query + "\n")
-            updated = True
-        
-        # add the line in the buffer array
-        new_docs.append(line)
-
-    if updated == False:
-        raise ValueError("Docs has not found the keyword breakpoint")
-
-    # commit the new changes from the buffer array
-    with open("../docs/documentation.md", "w") as file:
-        for line in new_docs:
-            file.write(line)
-
-
-
-
-if __name__ == "__main__":
-    options_object = prompt()
-
-    write_header(options_object, "../src/vmaware.hpp")
-    write_header(options_object, "../src/vmaware_MIT.hpp")
-    write_cli(options_object)
-    write_docs(options_object)
+    # 8-column row format:
+    # | Flag alias | Description | Supported platforms | Certainty | Admin? | 32-bit only? | Notes | Code implementation |
+    admin_str = "Admin" if options.is_admin else ""
+    bit32_str = "32-bit" if options.only_32_bit else ""
+    notes_str = options.notes if options.notes else ""
+    row
