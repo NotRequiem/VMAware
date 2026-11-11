@@ -14317,40 +14317,6 @@ public:
         static flagset flag_collector;
         static flagset disabled_flag_collector;
 
-        /* Settings management */
-        struct settings {
-            flagset flag_collector = generate_default();
-
-            VMAWARE_CONSTEXPR void enable(const enum_flags flag) {
-                if (flag == ALL) {
-                    flag_collector |= generate_all();
-                }
-                else if (flag == DEFAULT) {
-                    flag_collector |= generate_default();
-                }
-                else if (flag == EXPERIMENTAL) {
-                    disable_experimental_techniques(flag_collector);
-                }
-                else {
-                    const auto idx = static_cast<size_t>(flag);
-                    if (idx < flag_collector.size()) {
-                        flag_collector.set(idx, true);
-                    }
-                }
-            }
-
-            VMAWARE_CONSTEXPR void disable(const enum_flags flag) {
-                const auto idx = static_cast<size_t>(flag);
-                if (idx < flag_collector.size()) {
-                    flag_collector.set(idx, false);
-                }
-            }
-
-            constexpr bool is_set(const enum_flags flag) const {
-                return static_cast<size_t>(flag) < flag_collector.size() && flag_collector.test(static_cast<size_t>(flag));
-            }
-        };
-
         static flagset generate_default() {
             static const flagset default_flags = []() {
                 flagset f;
@@ -14376,10 +14342,6 @@ public:
             return default_flags;
         }
 
-        static void generate_default(flagset& flags) {
-            flags = generate_default();
-        }
-
         static flagset generate_all() {
             flagset flags = generate_default();
 
@@ -14393,34 +14355,11 @@ public:
             return flags;
         }
 
-        static void generate_all(flagset& flags) {
-            flags = generate_all();
-        }
-
-        static void reset_disabled_flagset() {
-            get_disabled_flag_collector().reset();
-            for (const auto technique : get_disabled_techniques()) {
-                const auto idx = static_cast<size_t>(technique);
-                if (idx < get_disabled_flag_collector().size()) {
-                    get_disabled_flag_collector().set(idx, true);
-                }
-            }
-        }
-
         static void disable_experimental_techniques(flagset& flags) {
             for (const auto technique : experimental_techniques) {
                 const auto idx = static_cast<size_t>(technique);
                 if (idx < flags.size()) {
                     flags.reset(idx);
-                }
-            }
-        }
-
-        static void disable_experimental_techniques() {
-            for (const auto technique : experimental_techniques) {
-                const auto idx = static_cast<size_t>(technique);
-                if (idx < get_disabled_flag_collector().size()) {
-                    get_disabled_flag_collector().set(idx, true);
                 }
             }
         }
@@ -14454,8 +14393,6 @@ public:
     };
 
     // START OF PUBLIC FUNCTIONS
-
-    using settings = core::settings;
 
     /**
      * @brief Check for a specific technique based on flag argument
@@ -14532,29 +14469,17 @@ public:
      * @return const char*
      * @link https://github.com/NotRequiem/VMAware/blob/main/docs/documentation.md#vmbrand
      */
-    template <typename ...Args>
-    static std::string brand(const Args ...args) {
-        const flagset flags = core::arg_handler(args...);
-        return brand(flags);
-    }
-
-
-    static std::string brand(const settings& settings) {
-        const flagset flags = settings.flag_collector;
-        return brand(flags);
-    }
-
-
     static std::string brand(const flagset& flags = core::generate_default()) {
-        /* Is the multiple setting flag enabled? */
-        const bool is_multiple = core::is_enabled(flags, MULTIPLE);
-
-        if (is_multiple) {
+        if (core::is_enabled(flags, MULTIPLE)) {
             return brands::brand_multiple(flags);
         }
-
         const enum brand_enum b = brands::brand_single(flags);
         return brands::brand_enum_to_string(b);
+    }
+
+    template <typename T, typename... Args>
+    static std::string brand(T first, Args... rest) {
+        return brand(core::arg_handler(first, rest...));
     }
 
 
@@ -14564,42 +14489,15 @@ public:
      * @return bool
      * @link https://github.com/NotRequiem/VMAware/blob/main/docs/documentation.md#vmdetect
      */
-    template <typename ...Args>
-    static bool detect(const Args ...args) noexcept {
-        /* Fetch all the flags in a std::bitset */
-        const flagset flags = core::arg_handler(args...);
-        return detect(flags);
-    }
-
-
-    static bool detect(const settings& settings) noexcept {
-        const flagset flags = settings.flag_collector;
-        return detect(flags);
-    }
-
-
-    static bool detect(const flagset &flags = core::generate_default()) {
-        /*
-         * Run all the techniques based on the
-         * flags above, and get a total score
-         */
+    static bool detect(const flagset& flags = core::generate_default()) {
         const u16 points = core::run_all(flags, SHORTCUT);
+        const u16 threshold = core::is_enabled(flags, HIGH_THRESHOLD) ? high_threshold_score : threshold_score;
+        return (points >= threshold);
+    }
 
-        u16 threshold = threshold_score;
-
-        /*
-         * If high threshold is set, the bar
-         * will be 300. If not, leave it as 150
-         */
-        if (core::is_enabled(flags, HIGH_THRESHOLD)) {
-            threshold = high_threshold_score;
-        }
-
-        if (points >= threshold) {
-            return true;
-        }
-
-        return false;
+    template <typename T, typename... Args>
+    static bool detect(T first, Args... rest) {
+        return detect(core::arg_handler(first, rest...));
     }
 
 
@@ -14609,44 +14507,18 @@ public:
      * @return std::uint8_t
      * @link https://github.com/NotRequiem/VMAware/blob/main/docs/documentation.md#vmpercentage
      */
-    template <typename ...Args>
-    static u8 percentage(const Args ...args) noexcept {
-        /* Fetch all the flags in a std::bitset */
-        const flagset flags = core::arg_handler(args...);
-        return percentage(flags);
-    }
-
-
-    static u8 percentage(const settings& settings) noexcept {
-        const flagset flags = settings.flag_collector;
-        return percentage(flags);
-    }
-
-
-    static u8 percentage(const flagset &flags = core::generate_default()) {
-        /*
-         * Run all the techniques based on the
-         * flags above, and get a total score
-         */
+    static u8 percentage(const flagset& flags = core::generate_default()) {
         const u16 points = core::run_all(flags, SHORTCUT);
+        const u16 threshold = core::is_enabled(flags, HIGH_THRESHOLD) ? high_threshold_score : threshold_score;
 
-        u8 percent = 0;
-        u16 threshold = threshold_score;
+        if (points >= threshold) return 100;
+        if (points >= 100) return 99;
+        return static_cast<u8>(std::min<u16>(points, 99));
+    }
 
-        /* Set to 300 if high threshold is enabled */
-        if (core::is_enabled(flags, HIGH_THRESHOLD)) {
-            threshold = high_threshold_score;
-        }
-
-        if (points >= threshold) {
-            percent = 100;
-        } else if (points >= 100) {
-            percent = 99;
-        } else {
-            percent = static_cast<u8>(std::min<u16>(points, 99));
-        }
-
-        return percent;
+    template <typename T, typename... Args>
+    static u8 percentage(T first, Args... rest) {
+        return percentage(core::arg_handler(first, rest...));
     }
 
 
@@ -14827,35 +14699,20 @@ public:
      * @param any flag combination in VM structure or nothing
      * @return VM::enum_vector
      */
-    template <typename ...Args>
-    static std::vector<enum_flags> detected_enums(const Args ...args) {
-        const flagset flags = core::arg_handler(args...);
-        return detected_enums(flags);
-    }
-
-
-    static std::vector<enum_flags> detected_enums(const settings& settings) {
-        const flagset flags = settings.flag_collector;
-        return detected_enums(flags);
-    }
-
-
-    static std::vector<enum_flags> detected_enums(const flagset &flags = core::generate_default()) {
+    static std::vector<enum_flags> detected_enums(const flagset& flags = core::generate_default()) {
         std::vector<enum_flags> tmp;
-
-        /*
-         * This will loop through all the enums in the technique_vector variable,
-         * and then checks each of them and outputs the enum that was detected
-         */
         for (u8 i = technique_begin; i < technique_end; ++i) {
             const enum_flags technique_enum = static_cast<enum_flags>(i);
-
-            if ((flags.test(technique_enum)) && (check(technique_enum))) {
+            if (flags.test(technique_enum) && check(technique_enum)) {
                 tmp.push_back(technique_enum);
             }
         }
-
         return tmp;
+    }
+
+    template <typename T, typename... Args>
+    static std::vector<enum_flags> detected_enums(T first, Args... rest) {
+        return detected_enums(core::arg_handler(first, rest...));
     }
 
 
@@ -14864,21 +14721,13 @@ public:
      * @param any flag combination in VM structure or nothing
      * @return std::uint8_t
      */
-    template <typename ...Args>
-    static u8 detected_count(const Args ...args) noexcept {
-        const flagset flags = core::arg_handler(args...);
-        return detected_count(flags);
-    }
-
-
-    static u8 detected_count(const settings& settings) noexcept {
-        const flagset flags = settings.flag_collector;
-        return detected_count(flags);
-    }
-
-
     static u8 detected_count(const flagset& flags = core::generate_default()) {
         return core::run_all(flags).detected_count;
+    }
+
+    template <typename T, typename... Args>
+    static u8 detected_count(T first, Args... rest) {
+        return detected_count(core::arg_handler(first, rest...));
     }
 
 
@@ -14887,105 +14736,94 @@ public:
      * @param any flag combination in VM structure or nothing
      * @return std::string
      */
-    template <typename ...Args>
-    static std::string type(const Args ...args) {
-        const flagset flags = core::arg_handler(args...);
-        return type(flags);
-    }
-
-
-    static std::string type(const settings& settings) {
-        const flagset flags = settings.flag_collector;
-        return type(flags);
-    }
-
-
-    static std::string type(const flagset &flags = core::generate_default()) {
+    static std::string type(const flagset& flags = core::generate_default()) {
         const brand_list_t& list = brands::brand_list(flags);
 
-        if (core::is_enabled(flags, MULTIPLE)) {
-            if (list.size() > 1) {
-                return "Unknown";
-            }
+        if (core::is_enabled(flags, MULTIPLE) && list.size() > 1) {
+            return "Unknown";
         }
-    
+
         const enum brand_enum brand = brands::brand_single(list);
 
         switch (brand) {
-            case brand_enum::XEN: return "Hypervisor (Type 1)";
-            case brand_enum::VMWARE_ESX: return "Hypervisor (Type 1)";
-            case brand_enum::ACRN: return "Hypervisor (Type 1)";
-            case brand_enum::QNX: return "Hypervisor (Type 1)";
-            case brand_enum::HYPERV: return "Hypervisor (Type 2)"; /* to clarify you're running under a Hyper-V guest VM */
-            case brand_enum::AZURE_HYPERV: return "Hypervisor (Type 1)";
-            case brand_enum::KVM: return "Hypervisor (Type 1)";
-            case brand_enum::KVM_HYPERV: return "Hypervisor (Type 1)";
-            case brand_enum::QEMU_KVM_HYPERV: return "Hypervisor (Type 1)";
-            case brand_enum::QEMU_KVM: return "Hypervisor (Type 1)";
-            case brand_enum::INTEL_KGT: return "Hypervisor (Type 1)";
-            case brand_enum::SIMPLEVISOR: return "Hypervisor (Type 1)";
-            case brand_enum::OPENSTACK: return "Hypervisor (Type 1)";
-            case brand_enum::KUBEVIRT: return "Hypervisor (Type 1)";
-            case brand_enum::POWERVM: return "Hypervisor (Type 1)";
-            case brand_enum::AWS_NITRO: return "Hypervisor (Type 1)";
-            case brand_enum::LKVM: return "Hypervisor (Type 1)";
-            case brand_enum::NOIRVISOR: return "Hypervisor (Type 1)";
-            case brand_enum::WSL: return "Hypervisor (Type 1)";  /* Type 1-derived lightweight VM system */
-            case brand_enum::DBVM: return "Hypervisor (Type 1)" ;
-            case brand_enum::BHYVE: return "Hypervisor (Type 2)";
-            case brand_enum::VBOX: return "Hypervisor (Type 2)";
-            case brand_enum::VMWARE: return "Hypervisor (Type 2)";
-            case brand_enum::VMWARE_EXPRESS: return "Hypervisor (Type 2)";
-            case brand_enum::VMWARE_GSX: return "Hypervisor (Type 2)";
-            case brand_enum::VMWARE_WORKSTATION: return "Hypervisor (Type 2)";
-            case brand_enum::VMWARE_FUSION: return "Hypervisor (Type 2)";
-            case brand_enum::PARALLELS: return "Hypervisor (Type 2)";
-            case brand_enum::VPC: return "Hypervisor (Type 2)";
-            case brand_enum::NVMM: return "Hypervisor (Type 2)";
-            case brand_enum::BSD_VMM: return "Hypervisor (Type 2)";
-            case brand_enum::HYPERV_VPC: return "Hypervisor (Type 2)";
-            case brand_enum::VMWARE_HARD: return "Hypervisor (Type 2)";
-            case brand_enum::UTM: return "Hypervisor (Type 2)";
-            case brand_enum::INTEL_HAXM: return "Hosted hypervisor / accelerator (Type 2)";
-            case brand_enum::CUCKOO: return "Sandbox";
-            case brand_enum::SANDBOXIE: return "Sandbox";
-            case brand_enum::HYBRID: return "Sandbox";
-            case brand_enum::CWSANDBOX: return "Sandbox";
-            case brand_enum::JOEBOX: return "Sandbox";
-            case brand_enum::ANUBIS: return "Sandbox";
-            case brand_enum::COMODO: return "Sandbox";
-            case brand_enum::THREATEXPERT: return "Sandbox";
-            case brand_enum::QIHOO: return "Sandbox";
-            case brand_enum::BOCHS: return "Emulator";
-            case brand_enum::BLUESTACKS: return "Emulator";
-            case brand_enum::NEKO_PROJECT: return "Emulator";
-            case brand_enum::COMPAQ: return "Emulator";
-            case brand_enum::INSIGNIA: return "Emulator";
-            case brand_enum::CONNECTIX: return "Emulator";
-            case brand_enum::QEMU: return "Emulator/Hypervisor (Type 2)";
-            case brand_enum::JAILHOUSE: return "Partitioning Hypervisor";
-            case brand_enum::UNISYS: return "Partitioning Hypervisor";
-            case brand_enum::DOCKER: return "Container";
-            case brand_enum::PODMAN: return "Container";
-            case brand_enum::OPENVZ: return "Container";
-            case brand_enum::CONTAINERD: return "Container";
-            case brand_enum::LMHS: return "Hypervisor (unknown type)";
-            case brand_enum::WINE: return "Compatibility layer";
-            case brand_enum::INTEL_TDX: return "Trusted Domain";
-            case brand_enum::APPLE_VZ: return "Unknown";
-            case brand_enum::UML: return "Paravirtualised/Hypervisor (Type 2)";
-            case brand_enum::AMD_SEV: return "VM encryptor";
-            case brand_enum::AMD_SEV_ES: return "VM encryptor";
-            case brand_enum::AMD_SEV_SNP: return "VM encryptor";
-            case brand_enum::GCE: return "Cloud VM service";
-            case brand_enum::BAREVISOR: return "Hypervisor (Type 1)";
-            case brand_enum::HYPERPLATFORM: return "Hypervisor (Type 1)";
-            case brand_enum::MINIVISOR: return "Hypervisor (Type 1)";
-            case brand_enum::HYPERV_ROOT: return "Host machine"; /* This refers to the type 1 hypervisor where Windows normally runs under, we put "Host machine" to clarify you're not running under a traditional VM if this is detected */
-            case brand_enum::NULL_BRAND: return "Unknown";
+            case brand_enum::XEN:               return "Hypervisor (Type 1)";
+            case brand_enum::VMWARE_ESX:        return "Hypervisor (Type 1)";
+            case brand_enum::ACRN:              return "Hypervisor (Type 1)";
+            case brand_enum::QNX:               return "Hypervisor (Type 1)";
+            case brand_enum::HYPERV:            return "Hypervisor (Type 2)";
+            case brand_enum::AZURE_HYPERV:      return "Hypervisor (Type 1)";
+            case brand_enum::KVM:               return "Hypervisor (Type 1)";
+            case brand_enum::KVM_HYPERV:        return "Hypervisor (Type 1)";
+            case brand_enum::QEMU_KVM_HYPERV:   return "Hypervisor (Type 1)";
+            case brand_enum::QEMU_KVM:          return "Hypervisor (Type 1)";
+            case brand_enum::INTEL_KGT:         return "Hypervisor (Type 1)";
+            case brand_enum::SIMPLEVISOR:       return "Hypervisor (Type 1)";
+            case brand_enum::OPENSTACK:         return "Hypervisor (Type 1)";
+            case brand_enum::KUBEVIRT:          return "Hypervisor (Type 1)";
+            case brand_enum::POWERVM:           return "Hypervisor (Type 1)";
+            case brand_enum::AWS_NITRO:         return "Hypervisor (Type 1)";
+            case brand_enum::LKVM:              return "Hypervisor (Type 1)";
+            case brand_enum::NOIRVISOR:         return "Hypervisor (Type 1)";
+            case brand_enum::WSL:               return "Hypervisor (Type 1)";
+            case brand_enum::DBVM:              return "Hypervisor (Type 1)";
+            case brand_enum::BHYVE:             return "Hypervisor (Type 2)";
+            case brand_enum::VBOX:              return "Hypervisor (Type 2)";
+            case brand_enum::VMWARE:            return "Hypervisor (Type 2)";
+            case brand_enum::VMWARE_EXPRESS:    return "Hypervisor (Type 2)";
+            case brand_enum::VMWARE_GSX:        return "Hypervisor (Type 2)";
+            case brand_enum::VMWARE_WORKSTATION:return "Hypervisor (Type 2)";
+            case brand_enum::VMWARE_FUSION:     return "Hypervisor (Type 2)";
+            case brand_enum::PARALLELS:         return "Hypervisor (Type 2)";
+            case brand_enum::VPC:               return "Hypervisor (Type 2)";
+            case brand_enum::NVMM:              return "Hypervisor (Type 2)";
+            case brand_enum::BSD_VMM:           return "Hypervisor (Type 2)";
+            case brand_enum::HYPERV_VPC:        return "Hypervisor (Type 2)";
+            case brand_enum::VMWARE_HARD:       return "Hypervisor (Type 2)";
+            case brand_enum::UTM:               return "Hypervisor (Type 2)";
+            case brand_enum::INTEL_HAXM:        return "Hosted hypervisor / accelerator (Type 2)";
+            case brand_enum::CUCKOO:            return "Sandbox";
+            case brand_enum::SANDBOXIE:         return "Sandbox";
+            case brand_enum::HYBRID:            return "Sandbox";
+            case brand_enum::CWSANDBOX:         return "Sandbox";
+            case brand_enum::JOEBOX:            return "Sandbox";
+            case brand_enum::ANUBIS:            return "Sandbox";
+            case brand_enum::COMODO:            return "Sandbox";
+            case brand_enum::THREATEXPERT:      return "Sandbox";
+            case brand_enum::QIHOO:             return "Sandbox";
+            case brand_enum::BOCHS:             return "Emulator";
+            case brand_enum::BLUESTACKS:        return "Emulator";
+            case brand_enum::NEKO_PROJECT:      return "Emulator";
+            case brand_enum::COMPAQ:            return "Emulator";
+            case brand_enum::INSIGNIA:          return "Emulator";
+            case brand_enum::CONNECTIX:         return "Emulator";
+            case brand_enum::QEMU:              return "Emulator/Hypervisor (Type 2)";
+            case brand_enum::JAILHOUSE:         return "Partitioning Hypervisor";
+            case brand_enum::UNISYS:            return "Partitioning Hypervisor";
+            case brand_enum::DOCKER:            return "Container";
+            case brand_enum::PODMAN:            return "Container";
+            case brand_enum::OPENVZ:            return "Container";
+            case brand_enum::CONTAINERD:        return "Container";
+            case brand_enum::LMHS:              return "Hypervisor (unknown type)";
+            case brand_enum::WINE:              return "Compatibility layer";
+            case brand_enum::INTEL_TDX:         return "Trusted Domain";
+            case brand_enum::APPLE_VZ:          return "Unknown";
+            case brand_enum::UML:               return "Paravirtualised/Hypervisor (Type 2)";
+            case brand_enum::AMD_SEV:           return "VM encryptor";
+            case brand_enum::AMD_SEV_ES:        return "VM encryptor";
+            case brand_enum::AMD_SEV_SNP:       return "VM encryptor";
+            case brand_enum::GCE:               return "Cloud VM service";
+            case brand_enum::BAREVISOR:         return "Hypervisor (Type 1)";
+            case brand_enum::HYPERPLATFORM:     return "Hypervisor (Type 1)";
+            case brand_enum::MINIVISOR:         return "Hypervisor (Type 1)";
+            case brand_enum::HYPERV_ROOT:       return "Host machine";
+            case brand_enum::NULL_BRAND:        return "Unknown";
+            default:                            return "Invalid";
         }
+    }
 
-        return "Invalid";
+    template <typename T, typename... Args>
+    static std::string type(T first, Args... rest) {
+        return type(core::arg_handler(first, rest...));
     }
 
 
@@ -14994,22 +14832,9 @@ public:
       * @param any flag combination in VM structure or nothing
       * @return std::string
       */
-    template <typename ...Args>
-    static std::string conclusion(const Args ...args) {
-        const flagset flags = core::arg_handler(args...);
-        return conclusion(flags);
-    }
-
-
-    static std::string conclusion(const settings& settings) {
-        const flagset flags = settings.flag_collector;
-        return conclusion(flags);
-    }
-
-
     static std::string conclusion(const flagset& flags = core::generate_default()) {
         const u8 percent_tmp = percentage(flags);
-        
+
         constexpr const char* very_unlikely = "Very unlikely";
         constexpr const char* unlikely = "Unlikely";
         constexpr const char* potentially = "Potentially";
@@ -15017,76 +14842,53 @@ public:
         constexpr const char* likely = "Likely";
         constexpr const char* very_likely = "Very likely";
         constexpr const char* inside_vm = "Running inside";
-        
+
         auto make_conclusion = [&](const char* category) -> std::string {
             const brand_list_t& list = brands::brand_list(flags);
-
             const brand_enum first_brand = brands::brand_single(list);
-
             const char* addition = " a ";
 
-            /*
-             * This basically just fixes the grammatical syntax
-             * by either having "a" or "an" before the VM brand
-             * name. It would look weird if the conclusion
-             * message was "an VirtualBox" or "a Anubis"
-             */
-            if 
-            ( 
-                (first_brand == brand_enum::ACRN)        ||
-                (first_brand == brand_enum::ANUBIS)      ||
-                (first_brand == brand_enum::BSD_VMM)     ||
-                (first_brand == brand_enum::INTEL_HAXM)  ||
-                (first_brand == brand_enum::APPLE_VZ)    ||
-                (first_brand == brand_enum::INTEL_KGT)   ||
-                (first_brand == brand_enum::POWERVM)     ||
-                (first_brand == brand_enum::OPENSTACK)   ||
-                (first_brand == brand_enum::AWS_NITRO)   ||
-                (first_brand == brand_enum::OPENVZ)      ||
-                (first_brand == brand_enum::INTEL_TDX)   ||
-                (first_brand == brand_enum::AMD_SEV)     ||
-                (first_brand == brand_enum::AMD_SEV_ES)  ||
+            if ((first_brand == brand_enum::ACRN) ||
+                (first_brand == brand_enum::ANUBIS) ||
+                (first_brand == brand_enum::BSD_VMM) ||
+                (first_brand == brand_enum::INTEL_HAXM) ||
+                (first_brand == brand_enum::APPLE_VZ) ||
+                (first_brand == brand_enum::INTEL_KGT) ||
+                (first_brand == brand_enum::POWERVM) ||
+                (first_brand == brand_enum::OPENSTACK) ||
+                (first_brand == brand_enum::AWS_NITRO) ||
+                (first_brand == brand_enum::OPENVZ) ||
+                (first_brand == brand_enum::INTEL_TDX) ||
+                (first_brand == brand_enum::AMD_SEV) ||
+                (first_brand == brand_enum::AMD_SEV_ES) ||
                 (first_brand == brand_enum::AMD_SEV_SNP) ||
-                (first_brand == brand_enum::NULL_BRAND)              
-            )   
-            {             addition = " an ";             }
-
-            std::string brand_str;
-
-            /*
-             * This is basically just to remove the capital "U",
-             * since it doesn't make sense to see "an Unknown"
-             */
-            if (first_brand == brand_enum::NULL_BRAND) {
-                brand_str = "unknown";
-            } 
-            else {
-                if (core::is_enabled(flags, MULTIPLE)) {
-                    brand_str = brands::brand_multiple(flags);
-                } 
-                else {
-                    brand_str = brands::brand_enum_to_string(first_brand);
-                }
+                (first_brand == brand_enum::NULL_BRAND))
+            {
+                addition = " an ";
             }
 
-            const std::string result = 
-                std::string(category) + 
-                addition + 
-                brand_str + 
-                /* Hyper-V artifacts are an exception due to how unique the circumstance is */
-                (first_brand == brand_enum::HYPERV_ROOT ? "" : " VM");
+            std::string brand_str;
+            if (first_brand == brand_enum::NULL_BRAND) {
+                brand_str = "unknown";
+            }
+            else {
+                brand_str = core::is_enabled(flags, MULTIPLE)
+                    ? brands::brand_multiple(flags)
+                    : brands::brand_enum_to_string(first_brand);
+            }
 
-            return result;
+            return std::string(category) + addition + brand_str +
+                (first_brand == brand_enum::HYPERV_ROOT ? "" : " VM");
         };
 
         if (core::is_enabled(flags, DYNAMIC)) {
-            if (percent_tmp == 0)  { return "Running on bare metal";        }
-            if (percent_tmp <= 20) { return make_conclusion(very_unlikely); }
-            if (percent_tmp <= 35) { return make_conclusion(unlikely);      }
-            if (percent_tmp < 50)  { return make_conclusion(potentially);   }
-            if (percent_tmp <= 62) { return make_conclusion(might);         }
-            if (percent_tmp <= 75) { return make_conclusion(likely);        }
-            if (percent_tmp < 100) { return make_conclusion(very_likely);   }
+            if (percent_tmp == 0)   return "Running on bare metal";
+            if (percent_tmp <= 20)  return make_conclusion(very_unlikely);
+            if (percent_tmp <= 35)  return make_conclusion(unlikely);
+            if (percent_tmp < 50)   return make_conclusion(potentially);
+            if (percent_tmp <= 62)  return make_conclusion(might);
+            if (percent_tmp <= 75)  return make_conclusion(likely);
+            if (percent_tmp < 100)  return make_conclusion(very_likely);
         }
 
         if (percent_tmp == 100) {
@@ -15094,6 +14896,11 @@ public:
         }
 
         return "Running on bare metal";
+    }
+
+    template <typename T, typename... Args>
+    static std::string conclusion(T first, Args... rest) {
+        return conclusion(core::arg_handler(first, rest...));
     }
 
     inline static u16 technique_count() noexcept {
