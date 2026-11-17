@@ -4720,28 +4720,72 @@ public:
             return false;
         }
 
-        constexpr int invalid_leaf = 0x04201337;
-        constexpr int hv_leaf = 0x40000000;
-        constexpr int subleaf = 0;
-        constexpr KAFFINITY one = 1;
-        const HANDLE current_thread = reinterpret_cast<HANDLE>(-2LL);
+        constexpr u32 invalid_leaf = 0x04201337u;
+        constexpr u32 hv_leaf = 0x40000000u;
+        constexpr u32 subleaf = 0u;
+        std::array<i32, 4> inv{}, hv{};
 
-        GROUP_AFFINITY prev{};
-        if (!GetThreadGroupAffinity(current_thread, &prev)) {
-            return false;
-        }
-        GROUP_AFFINITY aff{ prev.Mask & (~prev.Mask + one), prev.Group,{} };
-        if (!SetThreadGroupAffinity(current_thread, &aff, nullptr)) {
-            return false;
-        }
+        #if (VMAWARE_WINDOWS)
+            constexpr KAFFINITY one = 1;
+            const HANDLE current_thread = reinterpret_cast<HANDLE>(static_cast<LONG_PTR>(-2));
 
-        std::array<int, 4> inv{}, hv{};
-        __cpuidex(inv.data(), invalid_leaf, subleaf);
-        __cpuidex(hv.data(), hv_leaf, subleaf);
+            GROUP_AFFINITY prev{};
+            if (!GetThreadGroupAffinity(current_thread, &prev)) {
+                return false;
+            }
+            GROUP_AFFINITY aff{ prev.Mask & (~prev.Mask + one), prev.Group,{} };
+            if (!SetThreadGroupAffinity(current_thread, &aff, nullptr)) {
+                return false;
+            }
 
-        SetThreadGroupAffinity(current_thread, &prev, nullptr);
+            cpu::cpuid(inv.data(), invalid_leaf, subleaf);
+            cpu::cpuid(hv.data(), hv_leaf, subleaf);
 
-        return inv != hv;
+            SetThreadGroupAffinity(current_thread, &prev, nullptr);
+            return inv != hv;
+        #elif (VMAWARE_LINUX)
+            const pthread_t self = pthread_self();
+            cpu_set_t prev{}, aff{};
+            if (pthread_getaffinity_np(self, sizeof(prev), &prev) != 0) {
+                return false;
+            }
+            CPU_ZERO(&aff);
+            for (int i = 0; i < CPU_SETSIZE; ++i) {
+                if (CPU_ISSET(i, &prev)) {
+                    CPU_SET(i, &aff);
+                    break;
+                }
+            }
+            if (pthread_setaffinity_np(self, sizeof(aff), &aff) != 0) {
+                return false;
+            }
+
+            cpu::cpuid(inv.data(), invalid_leaf, subleaf);
+            cpu::cpuid(hv.data(), hv_leaf, subleaf);
+
+            pthread_setaffinity_np(self, sizeof(prev), &prev);
+            return inv != hv;
+        #elif (VMAWARE_APPLE)
+            auto apic_id = []() noexcept -> u32 {
+                u32 a = 0u, b = 0u, c = 0u, d = 0u;
+                cpu::cpuid(a, b, c, d, 0u, 0u);
+                if (a >= 0x0Bu) {
+                    cpuid(a, b, c, d, 0x0Bu, 0u);
+                    return d;
+                }
+                cpu::cpuid(a, b, c, d, 1u, 0u);
+                return b >> 24;
+            };
+
+            for (u32 i = 0u; i < 4u; ++i) {
+                const u32 before = apic_id();
+                cpu::cpuid(inv.data(), invalid_leaf, subleaf);
+                cpu::cpuid(hv.data(), hv_leaf, subleaf);
+                if (before == apic_id()) {
+                    return inv != hv;
+                }
+            }
+        #endif
     #endif
     }
                 
