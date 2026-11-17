@@ -59,10 +59,6 @@ jobs:
             compiler: i686-linux-gnu-g++
             package: g++-i686-linux-gnu
             processor: i686
-          - arch: mips64el
-            compiler: mips64el-linux-gnuabi64-g++
-            package: g++-mips64el-linux-gnuabi64
-            processor: mips64
           - arch: ppc64el
             compiler: powerpc64le-linux-gnu-g++
             package: g++-powerpc64le-linux-gnu
@@ -75,7 +71,6 @@ jobs:
             compiler: s390x-linux-gnu-g++
             package: g++-s390x-linux-gnu
             processor: s390x
-          # Additional fully-supported Linux cross-compilers
           - arch: alpha
             compiler: alpha-linux-gnu-g++
             package: g++-alpha-linux-gnu
@@ -88,18 +83,6 @@ jobs:
             compiler: m68k-linux-gnu-g++
             package: g++-m68k-linux-gnu
             processor: m68k
-          - arch: mips
-            compiler: mips-linux-gnu-g++
-            package: g++-mips-linux-gnu
-            processor: mips
-          - arch: mipsel
-            compiler: mipsel-linux-gnu-g++
-            package: g++-mipsel-linux-gnu
-            processor: mipsel
-          - arch: mips64
-            compiler: mips64-linux-gnuabi64-g++
-            package: g++-mips64-linux-gnuabi64
-            processor: mips64
           - arch: powerpc
             compiler: powerpc-linux-gnu-g++
             package: g++-powerpc-linux-gnu
@@ -120,35 +103,26 @@ jobs:
             compiler: x86_64-linux-gnux32-g++
             package: g++-x86-64-linux-gnux32
             processor: x86_64
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install tools (${{ matrix.arch }})
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends cmake ${{ matrix.package }}
-
-      - name: Build (${{ matrix.arch }})
-        run: |
-          CROSS_ARGS=""
-          if [ -n "${{ matrix.processor }}" ]; then
-            CROSS_ARGS="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.processor }}"
-          fi
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type || 'Release' }} \
-            -DDEBUG_OUTPUT=${{ matrix.debug_output || 'OFF' }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
-            $CROSS_ARGS
-          cmake --build build --config ${{ matrix.build_config || 'Release' }}
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vmaware-linux-${{ matrix.arch }}
-          path: build/vmaware
-          if-no-files-found: error
-          retention-days: 30
+          - arch: mips64el
+            compiler: mips64el-linux-gnuabi64-g++
+            package: g++-mips64el-linux-gnuabi64
+            processor: mips64
+            os: ubuntu-24.04
+          - arch: mips
+            compiler: mips-linux-gnu-g++
+            package: g++-mips-linux-gnu
+            processor: mips
+            os: ubuntu-24.04
+          - arch: mipsel
+            compiler: mipsel-linux-gnu-g++
+            package: g++-mipsel-linux-gnu
+            processor: mipsel
+            os: ubuntu-24.04
+          - arch: mips64
+            compiler: mips64-linux-gnuabi64-g++
+            package: g++-mips64-linux-gnuabi64
+            processor: mips64
+            os: ubuntu-24.04
 
   linux-cpp-standard:
     runs-on: ubuntu-latest
@@ -161,17 +135,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install g++-14
+      - name: Install g++-15
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends g++-14
+          sudo apt-get install -y --no-install-recommends g++-15
 
       - name: Configure (C++${{ matrix.std }})
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=${{ matrix.std }} \
-            -DCMAKE_CXX_COMPILER=g++-14
+            -DCMAKE_CXX_COMPILER=g++-15
 
       - name: Build (C++${{ matrix.std }})
         run: cmake --build build --config Release
@@ -189,12 +163,20 @@ jobs:
             package: g++-13
           - compiler: g++-14
             package: g++-14
-          - compiler: clang++-16
-            package: clang-16
+          - compiler: g++-15
+            package: g++-15
           - compiler: clang++-17
             package: clang-17
           - compiler: clang++-18
             package: clang-18
+          - compiler: clang++-19
+            package: clang-19
+          - compiler: clang++-20
+            package: clang-20
+          - compiler: clang++-21
+            package: clang-21
+          - compiler: clang++-22
+            package: clang-22
 
     steps:
       - uses: actions/checkout@v4

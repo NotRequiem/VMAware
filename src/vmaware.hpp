@@ -5323,7 +5323,7 @@ public:
 
             bool hypervisor_detected = false;
 
-            /* Analyze instruction latency results and report exactly what VMAware found */
+            /* Analyze latency and report exactly what VMAware found */
             if (!invalid_measurement) {
                 if (!check_nested) {
                     /* VMM = Time spent in hypervisor and bare metal; nVMM = Time spent in bare metal */
