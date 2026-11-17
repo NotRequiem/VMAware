@@ -31,7 +31,7 @@ env:
 
 jobs:
   linux-compilation:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: true
       matrix:
@@ -123,6 +123,35 @@ jobs:
             package: g++-mips64-linux-gnuabi64
             processor: mips64
             os: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (${{ matrix.arch }})
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends cmake ${{ matrix.package }}
+
+      - name: Build (${{ matrix.arch }})
+        run: |
+          CROSS_ARGS=""
+          if [ -n "${{ matrix.processor }}" ]; then
+            CROSS_ARGS="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.processor }}"
+          fi
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type || 'Release' }} \
+            -DDEBUG_OUTPUT=${{ matrix.debug_output || 'OFF' }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            $CROSS_ARGS
+          cmake --build build --config ${{ matrix.build_config || 'Release' }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmaware-linux-${{ matrix.arch }}
+          path: build/vmaware
+          if-no-files-found: error
+          retention-days: 30
 
   linux-cpp-standard:
     runs-on: ubuntu-latest
