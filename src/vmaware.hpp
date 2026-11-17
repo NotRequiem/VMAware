@@ -14125,6 +14125,44 @@ public:
             return true;
         }
 
+        auto is_kuser_time_static = []() noexcept -> bool {
+            constexpr std::uintptr_t interrupt_time_addr = 0x7FFE0008u; /* KUSER_SHARED_DATA.InterruptTime */
+            constexpr int max_retries = 1024;
+            constexpr DWORD sleep_ms = 1; /* Reaches next default OS tick (15.625ms), even with timeBeginPeriod(1)/0.5ms resolution; 1ms guarantees a change from nt!KeTimeIncrement */
+
+            const auto* t = reinterpret_cast<const volatile u32*>(interrupt_time_addr);
+
+            u64 t1 = 0;
+            int i = 0;
+            for (; i < max_retries; ++i) {
+                const u32 hi = t[1];
+                const u32 lo = t[0];
+                if (hi == t[2]) {
+                    t1 = (static_cast<u64>(hi) << 32) | lo;
+                    break;
+                }
+            }
+            if (i == max_retries) {
+                return true;
+            }
+
+            SleepEx(sleep_ms, FALSE);
+
+            for (i = 0; i < max_retries; ++i) {
+                const u32 hi = t[1];
+                const u32 lo = t[0];
+                if (hi == t[2]) {
+                    return ((static_cast<u64>(hi) << 32) | lo) <= t1;
+                }
+            }
+            return true;
+        };
+
+        if (is_kuser_time_static()) {
+            vma_debug("EMULATION: Detected static KUSER_SHARED_DATA structure");
+            return true;
+        }
+
     #endif
         return false;
     }
