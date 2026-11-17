@@ -4770,7 +4770,7 @@ public:
                 u32 a = 0u, b = 0u, c = 0u, d = 0u;
                 cpu::cpuid(a, b, c, d, 0u, 0u);
                 if (a >= 0x0Bu) {
-                    cpuid(a, b, c, d, 0x0Bu, 0u);
+                    cpu::cpuid(a, b, c, d, 0x0Bu, 0u);
                     return d;
                 }
                 cpu::cpuid(a, b, c, d, 1u, 0u);
@@ -5345,8 +5345,8 @@ public:
                 const double exception_ratio = best_db_l ? (double)best_db_l / (double)best_api_l : 0.0;
                 vma_debug("TIMER: Exception > VMM -> ", best_db_l, " | nVMM -> ", best_api_l, " | Ratio -> ", exception_ratio);
 
-                if (exception_ratio >= 2.5) {
-                    vma_debug("TIMER: Detected #DB interception latency");
+                if (exception_ratio >= 2.5 || (check_nested && exception_ratio <= 1.0)) {
+                    vma_debug("TIMER: Detected #DB interception latency OR L0 hypervisor disabling #DB while running Hyper-V");
                     hypervisor_detected = true;
                 }
             }
