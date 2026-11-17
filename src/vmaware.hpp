@@ -4716,7 +4716,32 @@ public:
             }
         }
 
-        return false;
+        if (util::hyper_x() == HYPERV_HOST) {
+            return false;
+        }
+
+        constexpr int invalid_leaf = 0x04201337;
+        constexpr int hv_leaf = 0x40000000;
+        constexpr int subleaf = 0;
+        constexpr KAFFINITY one = 1;
+        const HANDLE current_thread = reinterpret_cast<HANDLE>(-2LL);
+
+        GROUP_AFFINITY prev{};
+        if (!GetThreadGroupAffinity(current_thread, &prev)) {
+            return false;
+        }
+        GROUP_AFFINITY aff{ prev.Mask & (~prev.Mask + one), prev.Group,{} };
+        if (!SetThreadGroupAffinity(current_thread, &aff, nullptr)) {
+            return false;
+        }
+
+        std::array<int, 4> inv{}, hv{};
+        __cpuidex(inv.data(), invalid_leaf, subleaf);
+        __cpuidex(hv.data(), hv_leaf, subleaf);
+
+        SetThreadGroupAffinity(current_thread, &prev, nullptr);
+
+        return inv != hv;
     #endif
     }
                 
