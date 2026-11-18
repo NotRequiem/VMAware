@@ -1461,6 +1461,71 @@ public:
         #define VMAWARE_STR(x) VMAWARE_STR2(x)
 
         struct config {
+            enum class serialize_mode : u8 {
+                serialize_insn = 0,
+                lfence = 1,
+                mfence = 2
+            };
+
+            struct serialize_insn_tag {};
+            struct lfence_tag {};
+            struct mfence_tag {};
+
+            VMAWARE_SERIALIZE static VMAWARE_FORCE_INLINE void emit_barrier(serialize_insn_tag) noexcept {
+                _serialize();
+            }
+
+            static VMAWARE_FORCE_INLINE void emit_barrier(lfence_tag) noexcept {
+                _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
+                _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
+            }
+
+            static VMAWARE_FORCE_INLINE void emit_barrier(mfence_tag) noexcept {
+                _mm_mfence();
+                _mm_mfence();
+            }
+
+            [[nodiscard]] static inline serialize_mode detect_serialize_mode(bool& has_sse2) noexcept {
+                /* Note that should be instructions that DO NOT VMEXIT */
+                u32 eax = 0, ebx = 0, ecx = 0, edx = 0;
+
+                cpu::cpuid(eax, ebx, ecx, edx, 0x00000000, 0);
+                const u32 max_basic_leaf = eax;
+
+                has_sse2 = false;
+                if (max_basic_leaf >= 0x00000001) {
+                    cpu::cpuid(eax, ebx, ecx, edx, 0x00000001, 0);
+                    has_sse2 = (edx & (1u << 26)) != 0;
+                }
+
+                /* SERIALIZE requires Intel Alder Lake / Sapphire Rapids+ (CPUID.07H.0:EDX[14]) */
+                if (cpu::is_intel() && max_basic_leaf >= 0x00000007) {
+                    cpu::cpuid(eax, ebx, ecx, edx, 0x00000007, 0);
+                    if (edx & (1u << 14)) {
+                        return serialize_mode::serialize_insn;
+                    }
+                }
+
+                /* Intel without SERIALIZE: LFENCE is always execution-serializing in hardware */
+                if (cpu::is_intel()) {
+                    return serialize_mode::lfence;
+                }
+
+                /* AMD: LFENCE is guaranteed dispatch-serializing only if LFenceAlwaysSerializing (Fn8000_0021_EAX[2]) is set (Zen 3+) */
+                if (cpu::is_amd()) {
+                    cpu::cpuid(eax, ebx, ecx, edx, 0x80000000, 0);
+                    if (eax >= 0x80000021) {
+                        cpu::cpuid(eax, ebx, ecx, edx, 0x80000021, 0);
+                        if (eax & (1u << 2)) {
+                            return serialize_mode::lfence;
+                        }
+                    }
+                }
+
+                /* Fallback for older AMD (FX/Family 15h, Zen 1/2) & unknown vendors: MFENCE is unconditionally serializing */
+                return serialize_mode::mfence;
+            }
+
             [[nodiscard]] static VMAWARE_CONSTEXPR u32 get_seed() noexcept {
                 constexpr char s[] = __DATE__ " " __TIME__ " " __FILE__ " " VMAWARE_STR(__LINE__);
                 u32 h = 2166136261u;
@@ -2101,28 +2166,126 @@ public:
         };
 
         struct engine {
-             VMAWARE_SERIALIZE static VMAWARE_FORCE_INLINE void warmup_cpu(const bool serialize_available) noexcept {
-                /* Signal Intel Speed Shift / AMD CPPC to force maximum non-AVX Turbo/P-state frequency transition */
+            VMAWARE_SERIALIZE static VMAWARE_FORCE_INLINE void warmup_cpu(const timer::config::serialize_mode mode) noexcept {
+                /* Signal Intel Speed Shift/AMD CPPC to force maximum non-AVX Turbo/P-state frequency transition */
                 u64 val = 0x5a5a5a5a5a5a5a5aULL;
-                for (u32 i = 0; i < 2'000'000; ++i) {
+                for (u32 i = 0; i < 2000000; ++i) {
                     val = (val ^ i) * 6364136223846793005ULL + 1442695040888963407ULL;
                 }
                 const volatile u64 compiler_sink = val;
                 VMAWARE_UNUSED(compiler_sink);
 
                 /* Warm up the decoded i-cache (DSB), BTB, and microcode sequencer */
-                if (serialize_available) {
+                if (mode == timer::config::serialize_mode::serialize_insn) {
                     for (int i = 0; i < 5000; ++i) {
                         _serialize();
                         std::atomic_signal_fence(std::memory_order_seq_cst);
                     }
                 }
-                else {
+                else if (mode == timer::config::serialize_mode::lfence) {
                     for (int i = 0; i < 5000; ++i) {
                         _mm_lfence();
                         std::atomic_signal_fence(std::memory_order_seq_cst);
                     }
                 }
+                else {
+                    for (int i = 0; i < 5000; ++i) {
+                        _mm_mfence();
+                        std::atomic_signal_fence(std::memory_order_seq_cst);
+                    }
+                }
+            }
+
+             static VMAWARE_FORCE_INLINE void burn_random_cycles(const u32 ct_seed, const timer_tick_t v_post, const timer_tick_t r_post) noexcept {
+                 /*
+                  * The internal pseudo-random number generator (PRNG) variables like u64 seed and volatile u64 x can be kept as u64
+                  * because they are simple register-only PRNG arithmetic and benefit from the extra 64-bit entropy space even on 32-bit platforms
+                  */
+                 u64 seed = ct_seed;
+                 seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&seed));
+                 seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&v_post)) << 1;
+                 seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&r_post)) << 2;
+                 seed ^= seed >> 33;
+                 seed *= 0xff51afd7ed558ccdULL;
+                 seed ^= seed >> 33;
+                 seed *= 0xc4ceb9fe1a85ec53ULL;
+                 seed ^= seed >> 33;
+
+                 /* 64u is the minimum amount of work every time, 0x1FFu controls how much the count varies */
+                 const u32 rounds = 64u + static_cast<u32>(seed & 0x7FFu);
+                 volatile u64 x = seed | 1ULL;
+
+                 for (u32 i = 0; i < rounds; ++i) {
+                     x = x * 6364136223846793005ULL + 1ULL;
+                     x ^= x >> 17;
+                 }
+
+                 std::atomic_signal_fence(std::memory_order_acq_rel);
+             }
+
+             /* 
+              * Notice passing vm_samples.data()/ref_samples.data() as raw pointers instead of std::vector& 
+              * also prevents the compiler from reloading vector base pointers after std::atomic_signal_fence/cpuid 
+              */
+             template <typename barrier_tag>
+             static inline void execute_timer(
+                 const volatile timer::timer_tick_t* counter_ptr,
+                 timer::timer_tick_t* vm_buf,
+                 timer::timer_tick_t* ref_buf,
+                 size_t batch_size,
+                 size_t local_max_attempts,
+                 u32 ct_seed,
+                 size_t& valid,
+                 size_t& invalid
+             ) noexcept {
+                 while (valid < batch_size && invalid < local_max_attempts) {
+                     timer::timer_tick_t r_pre = 0, r_post = 0, v_pre = 0, v_post = 0, sync = 0;
+
+                     sync = *counter_ptr;
+                     while (*counter_ptr == sync);
+                     sync = *counter_ptr;
+                     VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                     while (*counter_ptr == sync);
+
+                     r_pre = *counter_ptr;
+                     std::atomic_signal_fence(std::memory_order_acq_rel);
+                     timer::config::emit_barrier(barrier_tag());
+                     std::atomic_signal_fence(std::memory_order_acq_rel);
+                     r_post = *counter_ptr;
+
+                     sync = *counter_ptr;
+                     while (*counter_ptr == sync);
+                     sync = *counter_ptr;
+                     VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
+                     while (*counter_ptr == sync);
+
+                     v_pre = *counter_ptr;
+                     std::atomic_signal_fence(std::memory_order_seq_cst);
+                #if (VMAWARE_GCC || VMAWARE_CLANG)  
+                     size_t a = 0;
+                     size_t b = 0, c = 0, d = 0;
+                     __asm__ volatile (
+                         "cpuid"
+                         : "+a"(a), "=b"(b), "=c"(c), "=d"(d)
+                     );
+                #else
+                     int dummy[4];
+                     __cpuid(dummy, 0);
+                #endif
+                     std::atomic_signal_fence(std::memory_order_seq_cst);
+                     v_post = *counter_ptr;
+
+                     if (v_post > v_pre && r_post > r_pre) {
+                         vm_buf[valid] = v_post - v_pre;
+                         ref_buf[valid] = r_post - r_pre;
+                         valid++;
+                     }
+                     else {
+                         invalid++;
+                     }
+
+                     timer::engine::burn_random_cycles(ct_seed, v_post, r_post);
+                 }
              }
 
             [[nodiscard]] static timer_tick_t calculate_latency(const std::vector<timer_tick_t>& samples_in) {
@@ -2156,33 +2319,6 @@ public:
 
                 /* Compute the average of the middle 50% and round to the nearest integer */
                 return static_cast<timer_tick_t>((sum / count) + 0.5);
-            }
-
-            static VMAWARE_FORCE_INLINE void burn_random_cycles(const u32 ct_seed, const timer_tick_t v_post, const timer_tick_t r_post) noexcept {
-                /*
-                 * The internal pseudo-random number generator (PRNG) variables like u64 seed and volatile u64 x can be kept as u64
-                 * because they are simple register-only PRNG arithmetic and benefit from the extra 64-bit entropy space even on 32-bit platforms
-                 */
-                u64 seed = ct_seed;
-                seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&seed));
-                seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&v_post)) << 1;
-                seed ^= static_cast<u64>(reinterpret_cast<std::uintptr_t>(&r_post)) << 2;
-                seed ^= seed >> 33;
-                seed *= 0xff51afd7ed558ccdULL;
-                seed ^= seed >> 33;
-                seed *= 0xc4ceb9fe1a85ec53ULL;
-                seed ^= seed >> 33;
-
-                /* 64u is the minimum amount of work every time, 0x1FFu controls how much the count varies */
-                const u32 rounds = 64u + static_cast<u32>(seed & 0x7FFu);
-                volatile u64 x = seed | 1ULL;
-
-                for (u32 i = 0; i < rounds; ++i) {
-                    x = x * 6364136223846793005ULL + 1ULL;
-                    x ^= x >> 17;
-                }
-
-                std::atomic_signal_fence(std::memory_order_acq_rel);
             }
         };
     };
@@ -4830,6 +4966,14 @@ public:
                 return false;
             }
 
+            bool has_sse2 = false;
+            const timer::config::serialize_mode barrier_mode = timer::config::detect_serialize_mode(has_sse2);
+            if (!has_sse2 && barrier_mode != timer::config::serialize_mode::serialize_insn) {
+                vma_debug("TIMER: CPU lacks SSE2 support for fence-based timing");
+                return false;
+            }
+            vma_debug("TIMER: Barrier mode (0=SERIALIZE, 1=LFENCE, 2=MFENCE): ", static_cast<int>(barrier_mode));
+
             const GROUP_AFFINITY trigger_affinity = timer::scheduler::get_mask(true);
             static GROUP_AFFINITY counter_affinity{};
             counter_affinity = timer::scheduler::get_mask(false);
@@ -4861,16 +5005,6 @@ public:
             if (util::hyper_x() == HYPERV_HOST) {
                 vma_debug("TIMER: Hyper-V detected, running nested checks");
                 check_nested = true;
-            }
-
-            bool serialize_available = cpu::is_intel();
-            if (serialize_available) {
-                /* SERIALIZE requires Ice Lake or newer */
-                u32 l7_eax = 0, l7_ebx = 0, l7_ecx = 0, l7_edx = 0;
-                cpu::cpuid(l7_eax, l7_ebx, l7_ecx, l7_edx, cpu::leaf::ext_features, 0);
-                if (!(l7_edx & (1u << 14))) {
-                    serialize_available = false;
-                }
             }
 
             VMAWARE_CONSTEXPR const u32 ct_seed = timer::config::get_seed();
@@ -5096,7 +5230,7 @@ public:
             state.start_test.store(true, std::memory_order_release);
 
             /* Cache and CPU scheduler warm-up won't affect anything in the measurement loop, so ramp up frequency/P-states to a high non-AVX Turbo/P-state without vmexits */
-            timer::engine::warmup_cpu(serialize_available);
+            timer::engine::warmup_cpu(barrier_mode);
 
             /*
              * state is a static local variable, so accessing state.counter directly requires the compiler to resolve its address using RIP-relative addressing or base-plus-displacement addressing on every single iteration
@@ -5111,128 +5245,31 @@ public:
 
                 /* Inside the timing windows, there must be zero memory output (no stack arrays can be written to), zero conditional branches and zero stack spilling (no register push/pops) */
                 if (!check_nested) {
-                    if (serialize_available) {
-                        while (valid < batch_size && invalid < local_max_attempts) {
-                            /* cpuid and serialize/lfence interpolated so that any turbo boost, thermal throttling, speculation (for the loop overhead itself, not for the serializing instructions), etc affects samples equally */
-                            timer::timer_tick_t r_pre = 0, r_post = 0, v_pre = 0, v_post = 0, sync = 0;
-
-                            /* This is done as a counter to both legitimate and malicious hypervisors interrupts that may pause the counter thread while we measure */
-                            sync = *counter_ptr;
-                            while (*counter_ptr == sync); /* Infer if counter got enough quantum momentum (so its currently scheduled) */
-
-                            /*
-                             * SERIALIZE/LFENCE check is before CPUID on purpose, so that possible pauses when cpuid is executed do not affect SERIALIZE/LFENCE too. The hv needs to wait for cpuid to pause the thread
-                             * the amount of instructions (8 in case of LFENCE) are enough for the Cross-Core/Cross-CCD MESI RFO cache bounce in the data race so that the counter thread sees an increment
-                             */
-                            sync = *counter_ptr;
-                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                            while (*counter_ptr == sync); /* Fastest busy-waiting strategy, PAUSE can conditionally exit, calling APIs like SwitchToThread() would be even worse */
-
-                            r_pre = *counter_ptr;
-                            std::atomic_signal_fence(std::memory_order_acq_rel);
-                            _serialize();
-                            std::atomic_signal_fence(std::memory_order_acq_rel);
-                            r_post = *counter_ptr;
-
-                            sync = *counter_ptr;
-                            while (*counter_ptr == sync); /* sync to our counter tick again by spam hitting L3 */
-                            sync = *counter_ptr;
-                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                            while (*counter_ptr == sync); /* and again */
-
-                            v_pre = *counter_ptr;
-                            std::atomic_signal_fence(std::memory_order_seq_cst); /* _ReadWriteBarrier() aka dont emit runtime fences */
-                        #if (VMAWARE_GCC || VMAWARE_CLANG)  
-                            size_t a = 0;
-                            size_t b = 0, c = 0, d = 0;
-                            __asm__ volatile (
-                                "cpuid"
-                                : "+a"(a), "=b"(b), "=c"(c), "=d"(d)
-                            );
-                        #else   
-                            int dummy[4];
-                            __cpuid(dummy, 0);
-                        #endif
-                            std::atomic_signal_fence(std::memory_order_seq_cst);
-                            v_post = *counter_ptr;
-
-                            /* We dont filter by cycles spent here (for example by querying thread cycle time) because the kernel would use TSC and the point of this function is to not use TSC or any other clock */
-                            if (v_post > v_pre && r_post > r_pre) {
-                                vm_samples[valid] = v_post - v_pre;
-                                ref_samples[valid] = r_post - r_pre;
-                                valid++;
-                            }
-                            else {
-                                invalid++;
-                            }
-
-                            /* Burn cycles executing a random number of instructions in each loop iteration, so that the hypervisor doesn't know when to pause the counter thread */
-                            timer::engine::burn_random_cycles(ct_seed, v_post, r_post);
-                        }
-                    }
-                    else {
-                        while (valid < batch_size && invalid < local_max_attempts) {
-                            /* This block's logic is the same as above but using LFENCE instead of SERIALIZE, read code comments above */
-                            timer::timer_tick_t r_pre = 0, r_post = 0, v_pre = 0, v_post = 0, sync = 0;
-
-                            sync = *counter_ptr;
-                            while (*counter_ptr == sync);
-                            sync = *counter_ptr;
-                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                            while (*counter_ptr == sync);
-
-                            r_pre = *counter_ptr;
-                            std::atomic_signal_fence(std::memory_order_acq_rel);
-                            _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
-                            _mm_lfence(); _mm_lfence(); _mm_lfence(); _mm_lfence();
-                            std::atomic_signal_fence(std::memory_order_acq_rel);
-                            r_post = *counter_ptr;
-
-                            sync = *counter_ptr;
-                            while (*counter_ptr == sync);
-                            sync = *counter_ptr;
-                            VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
-                            while (*counter_ptr == sync);
-
-                            v_pre = *counter_ptr;
-                            std::atomic_signal_fence(std::memory_order_seq_cst);
-                        #if (VMAWARE_GCC || VMAWARE_CLANG)
-                            size_t a = 0;
-                            size_t b = 0, c = 0, d = 0;
-                            __asm__ volatile (
-                                "cpuid"
-                                : "+a"(a), "=b"(b), "=c"(c), "=d"(d)
-                            );
-                            #else   
-                            int dummy[4];
-                            __cpuid(dummy, 0);
-                        #endif
-                            std::atomic_signal_fence(std::memory_order_seq_cst);
-                            v_post = *counter_ptr;
-
-                            if (v_post > v_pre && r_post > r_pre) {
-                                vm_samples[valid] = v_post - v_pre;
-                                ref_samples[valid] = r_post - r_pre;
-                                valid++;
-                            }
-                            else {
-                                invalid++;
-                            }
-
-                            timer::engine::burn_random_cycles(ct_seed, v_post, r_post);
-                        }
+                    switch (barrier_mode) {
+                    case timer::config::serialize_mode::serialize_insn:
+                        timer::engine::execute_timer<timer::config::serialize_insn_tag>(
+                            counter_ptr, vm_samples.data(), ref_samples.data(),
+                            batch_size, local_max_attempts, ct_seed, valid, invalid);
+                        break;
+                    case timer::config::serialize_mode::lfence:
+                        timer::engine::execute_timer<timer::config::lfence_tag>(
+                            counter_ptr, vm_samples.data(), ref_samples.data(),
+                            batch_size, local_max_attempts, ct_seed, valid, invalid);
+                        break;
+                    case timer::config::serialize_mode::mfence:
+                        timer::engine::execute_timer<timer::config::mfence_tag>(
+                            counter_ptr, vm_samples.data(), ref_samples.data(),
+                            batch_size, local_max_attempts, ct_seed, valid, invalid);
+                        break;
                     }
 
                     if (valid > 0) {
-                        /* Discard the unused default-initialized zero-elements */
                         active_vm_samples.assign(vm_samples.begin(), vm_samples.begin() + valid);
                         active_ref_samples.assign(ref_samples.begin(), ref_samples.begin() + valid);
 
-                        /* Check for lowest dense cluster with no interrupt spikes, filter noise we can't directly detect (SMIs, NMIs, etc) */
                         const timer::timer_tick_t cpuid_l = timer::engine::calculate_latency(active_vm_samples);
                         const timer::timer_tick_t ref_l = timer::engine::calculate_latency(active_ref_samples);
 
-                        /* Record the cleanest/lowest latency observed across the independent trials */
                         if (cpuid_l < best_cpuid_l) {
                             best_cpuid_l = cpuid_l;
                         }
@@ -5328,7 +5365,6 @@ public:
                 if (!check_nested) {
                     /* VMM = Time spent in hypervisor and bare metal; nVMM = Time spent in bare metal */
                     const double latency_ratio = best_ref_l ? (double)best_cpuid_l / (double)best_ref_l : 0;
-                    vma_debug("TIMER: CPU supports SERIALIZE: ", serialize_available);
                     vma_debug("TIMER: Instruction > VMM -> ", best_cpuid_l, " | nVMM -> ", best_ref_l, " | Ratio -> ", latency_ratio);
 
                     /* High latency can occur even with CPUID interception disabled if vCPU pinning is not 1:1, thus detecting the hypervisor, as this is a cache-based counter */
