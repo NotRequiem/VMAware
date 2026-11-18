@@ -5000,11 +5000,10 @@ public:
             }
 
             /* Calculation of minimum threshold for instrution latency */
-            constexpr double threshold = 2.75;
-            bool check_nested = false;
+            double threshold = 2.75;
             if (util::hyper_x() == HYPERV_HOST) {
                 vma_debug("TIMER: Hyper-V detected, running nested checks");
-                check_nested = true;
+                threshold = 200.0;
             }
 
             VMAWARE_CONSTEXPR const u32 ct_seed = timer::config::get_seed();
@@ -5016,10 +5015,9 @@ public:
             /* Pre-reserve active sample vectors to eliminate ANY dynamic heap allocations inside the trial loop */
             std::vector<timer::timer_tick_t> active_vm_samples, active_ref_samples;
             std::vector<timer::timer_tick_t> active_api_samples, active_db_samples;
-            if (!check_nested) {
-                active_vm_samples.reserve(batch_size);
-                active_ref_samples.reserve(batch_size);
-            }
+
+            active_vm_samples.reserve(batch_size);
+            active_ref_samples.reserve(batch_size);          
             active_api_samples.reserve(batch_size);
             active_db_samples.reserve(batch_size);
 
@@ -5244,40 +5242,41 @@ public:
                 size_t invalid = 0;
 
                 /* Inside the timing windows, there must be zero memory output (no stack arrays can be written to), zero conditional branches and zero stack spilling (no register push/pops) */
-                if (!check_nested) {
-                    switch (barrier_mode) {
-                    case timer::config::serialize_mode::serialize_insn:
-                        timer::engine::execute_timer<timer::config::serialize_insn_tag>(
-                            counter_ptr, vm_samples.data(), ref_samples.data(),
-                            batch_size, local_max_attempts, ct_seed, valid, invalid);
-                        break;
-                    case timer::config::serialize_mode::lfence:
-                        timer::engine::execute_timer<timer::config::lfence_tag>(
-                            counter_ptr, vm_samples.data(), ref_samples.data(),
-                            batch_size, local_max_attempts, ct_seed, valid, invalid);
-                        break;
-                    case timer::config::serialize_mode::mfence:
-                        timer::engine::execute_timer<timer::config::mfence_tag>(
-                            counter_ptr, vm_samples.data(), ref_samples.data(),
-                            batch_size, local_max_attempts, ct_seed, valid, invalid);
-                        break;
-                    }
-
-                    if (valid > 0) {
-                        active_vm_samples.assign(vm_samples.begin(), vm_samples.begin() + valid);
-                        active_ref_samples.assign(ref_samples.begin(), ref_samples.begin() + valid);
-
-                        const timer::timer_tick_t cpuid_l = timer::engine::calculate_latency(active_vm_samples);
-                        const timer::timer_tick_t ref_l = timer::engine::calculate_latency(active_ref_samples);
-
-                        if (cpuid_l < best_cpuid_l) {
-                            best_cpuid_l = cpuid_l;
-                        }
-                        if (ref_l < best_ref_l) {
-                            best_ref_l = ref_l;
-                        }
-                    }
+                switch (barrier_mode) {
+                case timer::config::serialize_mode::serialize_insn:
+                    timer::engine::execute_timer<timer::config::serialize_insn_tag>(
+                        counter_ptr, vm_samples.data(), ref_samples.data(),
+                        batch_size, local_max_attempts, ct_seed, valid, invalid
+                    );
+                    break;
+                case timer::config::serialize_mode::lfence:
+                    timer::engine::execute_timer<timer::config::lfence_tag>(
+                        counter_ptr, vm_samples.data(), ref_samples.data(),
+                        batch_size, local_max_attempts, ct_seed, valid, invalid
+                    );
+                    break;
+                case timer::config::serialize_mode::mfence:
+                    timer::engine::execute_timer<timer::config::mfence_tag>(
+                        counter_ptr, vm_samples.data(), ref_samples.data(),
+                        batch_size, local_max_attempts, ct_seed, valid, invalid
+                    );
+                    break;
                 }
+
+                if (valid > 0) {
+                    active_vm_samples.assign(vm_samples.begin(), vm_samples.begin() + valid);
+                    active_ref_samples.assign(ref_samples.begin(), ref_samples.begin() + valid);
+
+                    const timer::timer_tick_t cpuid_l = timer::engine::calculate_latency(active_vm_samples);
+                    const timer::timer_tick_t ref_l = timer::engine::calculate_latency(active_ref_samples);
+
+                    if (cpuid_l < best_cpuid_l) {
+                        best_cpuid_l = cpuid_l;
+                    }
+                    if (ref_l < best_ref_l) {
+                        best_ref_l = ref_l;
+                    }
+                }               
 
                 valid = 0;
                 invalid = 0;
@@ -5356,32 +5355,29 @@ public:
             cleanup();
 
             constexpr auto uninitialized_tick = (std::numeric_limits<timer::timer_tick_t>::max)();
-            const bool invalid_measurement = (!check_nested && best_ref_l == uninitialized_tick && best_cpuid_l == uninitialized_tick) || (best_db_l == uninitialized_tick && best_api_l == uninitialized_tick);
-
+            const bool invalid_measurement = (best_ref_l == uninitialized_tick && best_cpuid_l == uninitialized_tick) || (best_db_l == uninitialized_tick && best_api_l == uninitialized_tick);
             bool hypervisor_detected = false;
 
             /* Analyze latency and report exactly what VMAware found */
             if (!invalid_measurement) {
-                if (!check_nested) {
-                    /* VMM = Time spent in hypervisor and bare metal; nVMM = Time spent in bare metal */
-                    const double latency_ratio = best_ref_l ? (double)best_cpuid_l / (double)best_ref_l : 0;
-                    vma_debug("TIMER: Instruction > VMM -> ", best_cpuid_l, " | nVMM -> ", best_ref_l, " | Ratio -> ", latency_ratio);
+                /* VMM = Time spent in hypervisor and bare metal; nVMM = Time spent in bare metal */
+                const double latency_ratio = best_ref_l ? (double)best_cpuid_l / (double)best_ref_l : 0;
+                vma_debug("TIMER: Instruction > VMM -> ", best_cpuid_l, " | nVMM -> ", best_ref_l, " | Ratio -> ", latency_ratio);
 
-                    /* High latency can occur even with CPUID interception disabled if vCPU pinning is not 1:1, thus detecting the hypervisor, as this is a cache-based counter */
-                    if (latency_ratio >= threshold) {
-                        vma_debug("TIMER: Detected #VMEXIT latency");
-                        hypervisor_detected = true;
-                    }
-                    else if (best_cpuid_l >= 12000 || best_ref_l >= 12000) { /* If latency is abnormally high, it means something was spamming interrupts */
-                        vma_debug("TIMER: Detected artificial IPI delivery to timing threads");
-                        hypervisor_detected = true;
-                    }
+                /* High latency can occur even with CPUID interception disabled if vCPU pinning is not 1:1, thus detecting the hypervisor, as this is a cache-based counter */
+                if (latency_ratio >= threshold) {
+                    vma_debug("TIMER: Detected #VMEXIT latency");
+                    hypervisor_detected = true;
                 }
-
+                else if (best_cpuid_l >= 12000 || best_ref_l >= 12000) { /* If latency is abnormally high, it means something was spamming interrupts */
+                    vma_debug("TIMER: Detected artificial IPI delivery to timing threads");
+                    hypervisor_detected = true;
+                }
+                
                 const double exception_ratio = best_db_l ? (double)best_db_l / (double)best_api_l : 0.0;
                 vma_debug("TIMER: Exception > VMM -> ", best_db_l, " | nVMM -> ", best_api_l, " | Ratio -> ", exception_ratio);
 
-                if (exception_ratio >= 2.5 || (check_nested && exception_ratio <= 1.0)) {
+                if (exception_ratio >= 2.5) {
                     vma_debug("TIMER: Detected #DB interception latency OR L0 hypervisor disabling #DB while running Hyper-V");
                     hypervisor_detected = true;
                 }
