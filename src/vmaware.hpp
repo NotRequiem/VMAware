@@ -12567,7 +12567,7 @@ public:
         }
 
         struct exception_handler {
-            static VMAWARE_NOINLINE LONG execute(const EXCEPTION_POINTERS* info, volatile DWORD* _exception_code) noexcept {
+            static VMAWARE_NOINLINE LONG execute(const EXCEPTION_POINTERS* info, volatile DWORD* _exception_code, const bool allow_gp = false) noexcept {
                 if (!info || !info->ExceptionRecord) {
                     return EXCEPTION_CONTINUE_SEARCH;
                 }
@@ -12575,7 +12575,12 @@ public:
                 const DWORD code = info->ExceptionRecord->ExceptionCode;
 
                 /* Only intercept expected instruction and debug traps */
-                if (code != EXCEPTION_SINGLE_STEP && code != EXCEPTION_ILLEGAL_INSTRUCTION) {
+                const bool is_expected =
+                    (code == EXCEPTION_SINGLE_STEP) ||
+                    (code == EXCEPTION_ILLEGAL_INSTRUCTION) ||
+                    (allow_gp && (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_PRIV_INSTRUCTION));
+
+                if (!is_expected) {
                     return EXCEPTION_CONTINUE_SEARCH;
                 }
 
@@ -12584,11 +12589,11 @@ public:
                 }
 
                 if (info->ContextRecord) {
-                #if (VMAWARE_X86_64)
+            #if (VMAWARE_X86_64)
                     info->ContextRecord->Rbx = info->ContextRecord->R8;
-                #elif (VMAWARE_X86_32)
+            #elif (VMAWARE_X86_32)
                     info->ContextRecord->Ebx = info->ContextRecord->Edi;
-                #endif
+            #endif
                 }
                 return EXCEPTION_EXECUTE_HANDLER;
             }
@@ -12607,7 +12612,7 @@ public:
              * the bad bytes (C7 B2) causing STATUS_ILLEGAL_INSTRUCTION
              */
             if (exc_code_cpuid == EXCEPTION_SINGLE_STEP) {
-                cpuid_is_vm = false; /* trap flag single-step exception triggered on CPUID */
+                cpuid_is_vm = false; /* Trap flag single-step exception triggered on CPUID */
             }
         }
 
@@ -12635,8 +12640,11 @@ public:
         __try {
             memory::execute(rdpru_singlestep_stub);
         }
-        __except (exception_handler::execute(GetExceptionInformation(), &exc_code_rdpru)) {
-            if (exc_code_rdpru == EXCEPTION_SINGLE_STEP) {
+        __except (exception_handler::execute(GetExceptionInformation(), &exc_code_rdpru, true)) {
+            /* CR4.TSD = 1 blocks user-mode RDPRU with #GP(0) */
+            if (exc_code_rdpru == EXCEPTION_SINGLE_STEP ||
+                exc_code_rdpru == EXCEPTION_ACCESS_VIOLATION ||
+                exc_code_rdpru == EXCEPTION_PRIV_INSTRUCTION) {
                 rdpru_is_vm = false;
             }
         }
