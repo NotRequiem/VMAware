@@ -1471,8 +1471,8 @@ public:
             struct lfence_tag {};
             struct mfence_tag {};
 
-            VMAWARE_SERIALIZE static VMAWARE_FORCE_INLINE void emit_barrier(serialize_insn_tag) noexcept {
-                _serialize();
+            static VMAWARE_FORCE_INLINE void emit_barrier(serialize_insn_tag) noexcept {
+                engine::cpu_serialize_insn();
             }
 
             static VMAWARE_FORCE_INLINE void emit_barrier(lfence_tag) noexcept {
@@ -2166,7 +2166,15 @@ public:
         };
 
         struct engine {
-            VMAWARE_SERIALIZE static VMAWARE_FORCE_INLINE void warmup_cpu(const timer::config::serialize_mode mode) noexcept {
+            static VMAWARE_FORCE_INLINE void cpu_serialize_insn() noexcept {
+            #if (VMAWARE_GCC || VMAWARE_CLANG)
+                __asm__ __volatile__(".byte 0x0f, 0x01, 0xe8" ::: "memory");
+            #else
+                _serialize();
+            #endif
+            }
+
+            static void warmup_cpu(const timer::config::serialize_mode mode) noexcept {
                 /* Signal Intel Speed Shift/AMD CPPC to force maximum non-AVX Turbo/P-state frequency transition */
                 u64 val = 0x5a5a5a5a5a5a5a5aULL;
                 for (u32 i = 0; i < 2000000; ++i) {
@@ -2178,7 +2186,7 @@ public:
                 /* Warm up the decoded i-cache (DSB), BTB, and microcode sequencer */
                 if (mode == timer::config::serialize_mode::serialize_insn) {
                     for (int i = 0; i < 5000; ++i) {
-                        _serialize();
+                        cpu_serialize_insn();
                         std::atomic_signal_fence(std::memory_order_seq_cst);
                     }
                 }
