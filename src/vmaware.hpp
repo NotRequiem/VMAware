@@ -15263,11 +15263,11 @@ inline const std::array<VM::core::technique, VM::enum_size + 1>& VM::core::get_t
 
         #if (VMAWARE_LINUX || VMAWARE_WINDOWS)
             { VM::FIRMWARE,{ 100, VM::firmware } },
+            { VM::DISK,{ 150, VM::disk } },
             { VM::DEVICES,{ 95, VM::devices } },
             { VM::SYSTEM_REGISTERS,{ 50, VM::system_registers } },
-            { VM::AZURE,{ 30, VM::azure } },
             { VM::BOOT_LOGO,{ 90, VM::boot_logo } },
-            { VM::DISK,{ 150, VM::disk } },
+            { VM::AZURE,{ 30, VM::azure } },
         #endif
 
         #if (VMAWARE_LINUX)
