@@ -4725,6 +4725,10 @@ public:
             return core::add(brand_enum::SIMPLEVISOR);
         }
 
+        if (util::hyper_x() == HYPERV_HOST) {
+            return false;
+        }
+
         if (cpu::is_intel()) {
             const bool has_leaf_b = cpu::is_leaf_supported(cpu::leaf::ext_topology);
             const bool has_leaf_1f = cpu::is_leaf_supported(cpu::leaf::v2_ext_topology);
@@ -4735,20 +4739,79 @@ public:
             }
 
             u32 l1_eax = 0;
-            u32 l1_ebx = 0; 
-            u32 l1_ecx = 0; 
+            u32 l1_ebx = 0;
+            u32 l1_ecx = 0;
             u32 l1_edx = 0;
-            
+
             u32 vb_eax = 0;
-            u32 vb_ebx = 0; 
-            u32 vb_ecx = 0; 
+            u32 vb_ebx = 0;
+            u32 vb_ecx = 0;
             u32 vb_edx = 0;
-            
+
             u32 v1f_eax = 0;
-            u32 v1f_ebx = 0; 
-            u32 v1f_ecx = 0; 
+            u32 v1f_ebx = 0;
+            u32 v1f_ecx = 0;
             u32 v1f_edx = 0;
 
+            u32 initial_apic_id = 0;
+
+        #if (VMAWARE_WINDOWS)
+            constexpr KAFFINITY one = 1;
+            const HANDLE current_thread = reinterpret_cast<HANDLE>(static_cast<LONG_PTR>(-2));
+
+            GROUP_AFFINITY prev{};
+            if (!GetThreadGroupAffinity(current_thread, &prev)) {
+                return false;
+            }
+            GROUP_AFFINITY aff{ prev.Mask & (~prev.Mask + one), prev.Group,{} };
+            if (!SetThreadGroupAffinity(current_thread, &aff, nullptr)) {
+                return false;
+            }
+
+            cpu::cpuid(l1_eax, l1_ebx, l1_ecx, l1_edx, cpu::leaf::features, 0);
+
+            if (has_leaf_b) {
+                cpu::cpuid(vb_eax, vb_ebx, vb_ecx, vb_edx, cpu::leaf::ext_topology, 0);
+            }
+
+            if (has_leaf_1f) {
+                cpu::cpuid(v1f_eax, v1f_ebx, v1f_ecx, v1f_edx, cpu::leaf::v2_ext_topology, 0);
+            }
+
+            SetThreadGroupAffinity(current_thread, &prev, nullptr);
+
+            initial_apic_id = (l1_ebx >> 24) & 0xFF; /* Initial APIC ID */
+        #elif (VMAWARE_LINUX)
+            const pthread_t self = pthread_self();
+            cpu_set_t prev{}, aff{};
+            if (pthread_getaffinity_np(self, sizeof(prev), &prev) != 0) {
+                return false;
+            }
+            CPU_ZERO(&aff);
+            for (int i = 0; i < CPU_SETSIZE; ++i) {
+                if (CPU_ISSET(i, &prev)) {
+                    CPU_SET(i, &aff);
+                    break;
+                }
+            }
+            if (pthread_setaffinity_np(self, sizeof(aff), &aff) != 0) {
+                return false;
+            }
+
+            cpu::cpuid(l1_eax, l1_ebx, l1_ecx, l1_edx, cpu::leaf::features, 0);
+
+            if (has_leaf_b) {
+                cpu::cpuid(vb_eax, vb_ebx, vb_ecx, vb_edx, cpu::leaf::ext_topology, 0);
+            }
+
+            if (has_leaf_1f) {
+                cpu::cpuid(v1f_eax, v1f_ebx, v1f_ecx, v1f_edx, cpu::leaf::v2_ext_topology, 0);
+            }
+
+            pthread_setaffinity_np(self, sizeof(prev), &prev);
+
+            initial_apic_id = (l1_ebx >> 24) & 0xFF; /* Initial APIC ID */
+        #else
             u32 aba_start = 0;
             u32 aba_end = 0;
 
@@ -4774,8 +4837,8 @@ public:
                 cpu::cpuid(unused, l1_ebx, unused, unused, cpu::leaf::features, 0);
                 aba_end = (l1_ebx >> 24) & 0xFF;
 
-                if (aba_start == aba_end || ++retries >= 8) { 
-                    break; 
+                if (aba_start == aba_end || ++retries >= 8) {
+                    break;
                 }
             }
 
@@ -4787,7 +4850,8 @@ public:
                 return false;
             }
 
-            const u32 initial_apic_id = aba_start;
+            initial_apic_id = aba_start;
+        #endif
 
             /* Check Leaf 0x0B against Leaf 1 */
             if (has_leaf_b) {
@@ -4850,10 +4914,6 @@ public:
             if (has_intel_ibrs || has_intel_stibp || has_intel_ssbd) {
                 return true;
             }
-        }
-
-        if (util::hyper_x() == HYPERV_HOST) {
-            return false;
         }
 
         constexpr u32 invalid_leaf = 0x04201337u;
