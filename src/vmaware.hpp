@@ -11188,6 +11188,9 @@ public:
         bool detected = false;
         brand_enum detected_brand = brand_enum::NULL_BRAND;
 
+        bool found_vmgen = false;
+        bool found_vmgid = false;
+
         constexpr wchar_t target_vmgen[] = L"VmGenerationCounter";
         constexpr size_t target_vmgen_len = (sizeof(target_vmgen) / sizeof(wchar_t)) - 1;
 
@@ -11263,14 +11266,14 @@ public:
 
             /* VmGenerationCounter and VmGid are created by the Hyper-V VM Bus provider */
             if (effective_len == target_vmgen_len && _wcsnicmp(wname, target_vmgen, target_vmgen_len) == 0) {
-                vma_debug("KERNEL_OBJECTS: Detected VmGenerationCounter");
-                detected = true;
-                detected_brand = brand_enum::HYPERV;
-                break;
+                found_vmgen = true;
+            }
+            else if (effective_len == target_vmgid_len && _wcsnicmp(wname, target_vmgid, target_vmgid_len) == 0) {
+                found_vmgid = true;
             }
 
-            if (effective_len == target_vmgid_len && _wcsnicmp(wname, target_vmgid, target_vmgid_len) == 0) {
-                vma_debug("KERNEL_OBJECTS: Detected VmGid");
+            if (found_vmgen && found_vmgid) {
+                vma_debug("KERNEL_OBJECTS: Detected VmGenerationCounter and VmGid");
                 detected = true;
                 detected_brand = brand_enum::HYPERV;
                 break;
