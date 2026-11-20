@@ -7008,7 +7008,7 @@ public:
             "Parallels Software", "Parallels(R)",
             "innotek",            "Oracle",   "VirtualBox", "vbox", "VBOX",
             "VMware, Inc.",       "VMware",   "VMWARE",     "VMW0003",
-            "QEMU",               "pc-q35",   "Q35 +",      
+            "QEMU",               "pc-q35",   "Q35 +",
             "OVMF",               "EDK II", "WAET", "S3 Corp.", "VS2005R2",
             "BXPC",               "Xen"
         } };
@@ -7017,7 +7017,7 @@ public:
             brand_enum::PARALLELS,  brand_enum::PARALLELS,
             brand_enum::VBOX,       brand_enum::VBOX,       brand_enum::VBOX,       brand_enum::VBOX,       brand_enum::VBOX,
             brand_enum::VMWARE,     brand_enum::VMWARE,     brand_enum::VMWARE,     brand_enum::VMWARE,
-            brand_enum::QEMU,       brand_enum::QEMU,       brand_enum::QEMU,       
+            brand_enum::QEMU,       brand_enum::QEMU,       brand_enum::QEMU,
             brand_enum::NULL_BRAND, brand_enum::NULL_BRAND, brand_enum::NULL_BRAND, brand_enum::NULL_BRAND, brand_enum::NULL_BRAND,
             brand_enum::BOCHS,      brand_enum::XEN
         } };
@@ -7037,6 +7037,7 @@ public:
         /* Track cross-table validation parameters sequentially across buffers */
         bool dsdt_scanned = false;
         char dsdt_oem_id[7] = { 0 };
+        bool saw_bochs_acpi_oem = false;
 
         auto scan_buffer = [&](const u8* buffer, const size_t buffer_len, const bool is_acpi) noexcept -> bool {
             auto find_pattern = [&](const char* pattern, size_t pattern_len) noexcept -> bool {
@@ -7068,9 +7069,9 @@ public:
                 return false;
             };
 
-            /* 
+            /*
              * Decodes ACPI AML PkgLength at pos
-             * Sets pkg_total_len (total bytes including the PkgLength field itself) and hdr_len (1..4) 
+             * Sets pkg_total_len (total bytes including the PkgLength field itself) and hdr_len (1..4)
              */
             auto decode_pkg_length = [&](const size_t pos, size_t& pkg_total_len, size_t& hdr_len) noexcept -> bool {
                 if (pos >= buffer_len) {
@@ -7116,6 +7117,13 @@ public:
                     dsdt_oem_id[6] = '\0';
                 }
 
+                /* Record Bochs-lineage OEM identifiers without short-circuiting QEMU tables */
+                if (std::memcmp(header.oem_id, "BOCHS ", 6) == 0 ||
+                    std::memcmp(header.oem_table_id, "BXPC", 4) == 0 ||
+                    std::memcmp(header.asl_compiler_id, "BXPC", 4) == 0) {
+                    saw_bochs_acpi_oem = true;
+                }
+
                 const bool is_aml_table = (std::memcmp(header.signature, "DSDT", 4) == 0) || (std::memcmp(header.signature, "SSDT", 4) == 0);
 
                 /* 1) AML Bytecode inspection */
@@ -7130,24 +7138,55 @@ public:
                         return core::add(brand_enum::QEMU);
                     }
 
-                #if (VMAWARE_WINDOWS)
-                    if (find_pattern("DBUG", 4) && find_pattern("DBGB", 4)) {
-                        const char* man = nullptr;
-                        const char* mod = nullptr;
-                        bool is_acer_aspire = false;
+                    /* Verify both Field(DBG_, ByteAcc, NoLock, Preserve) { DBGB, 8 } and Method(DBUG, 1, NotSerialized) */
+                    {
+                        bool has_dbg_field = false;
+                        bool has_dbug_method = false;
 
-                        if (util::get_manufacturer_and_model(&man, &mod)) {
-                            if (man && mod && string::find_ci(man, "Acer") && string::find_ci(mod, "Aspire")) {
-                                is_acer_aspire = true;
+                        for (size_t i = 0; i + 2 <= buffer_len; ++i) {
+                            /* FieldOp: ExtOpPrefix (0x5B), FieldOp (0x81) */
+                            if (!has_dbg_field && buffer[i] == 0x5B && buffer[i + 1] == 0x81) {
+                                size_t pkg_len = 0, hdr_len = 0;
+                                if (decode_pkg_length(i + 2, pkg_len, hdr_len)) {
+                                    const size_t field_end = i + 2 + pkg_len;
+                                    size_t p = i + 2 + hdr_len;
+                                    if (p < field_end && buffer[p] == 0x5C) { /* Optional RootChar '\' */
+                                        ++p;
+                                    }
+                                    /* "DBG_" + FieldFlags (0x00 = ByteAcc, NoLock, Preserve) + NamedField("DBGB", 8) */
+                                    if (p + 10 <= field_end &&
+                                        std::memcmp(buffer + p, "DBG_", 4) == 0 &&
+                                        buffer[p + 4] == 0x00 &&
+                                        std::memcmp(buffer + p + 5, "DBGB", 4) == 0 &&
+                                        buffer[p + 9] == 0x08) {
+                                        has_dbg_field = true;
+                                    }
+                                }
+                            }
+
+                            /* MethodOp: 0x14, PkgLength, [opt '\'], "DBUG", MethodFlags (0x01 = 1 arg, NotSerialized) */
+                            if (!has_dbug_method && buffer[i] == 0x14) {
+                                size_t pkg_len = 0, hdr_len = 0;
+                                if (decode_pkg_length(i + 1, pkg_len, hdr_len)) {
+                                    const size_t meth_end = i + 1 + pkg_len;
+                                    size_t p = i + 1 + hdr_len;
+                                    if (p < meth_end && buffer[p] == 0x5C) { /* Optional RootChar '\' */
+                                        ++p;
+                                    }
+                                    if (p + 5 <= meth_end &&
+                                        std::memcmp(buffer + p, "DBUG", 4) == 0 &&
+                                        buffer[p + 4] == 0x01) {
+                                        has_dbug_method = true;
+                                    }
+                                }
+                            }
+
+                            if (has_dbg_field && has_dbug_method) {
+                                vma_debug("FIRMWARE: Detected QEMU DBG_/DBGB Field and DBUG Method");
+                                return core::add(brand_enum::QEMU);
                             }
                         }
-
-                        if (!is_acer_aspire) {
-                            vma_debug("FIRMWARE: Detected QEMU DBUG method and DBGB field definitions");
-                            return core::add(brand_enum::QEMU);
-                        }
                     }
-                #endif
 
                     /* QEMU virtual DRAM Controller named "DRAC" with its corresponding System Board PNPID */
                     if (find_pattern("DRAC", 4) && find_pattern("PNP0C01", 7)) {
@@ -7214,26 +7253,40 @@ public:
                     {
                         auto get_package_size = [&](const char* name) noexcept -> u8 {
                             if (!name) return 0;
-                            const u8* name_ptr = static_cast<const u8*>(std::memchr(buffer, name[0], buffer_len));
-                            while (name_ptr) {
+                            const u8* search = buffer;
+                            size_t rem = buffer_len;
+
+                            while (rem >= 6) {
+                                const void* hit = std::memchr(search, static_cast<u8>(name[0]), rem);
+                                if (!hit) {
+                                    return 0;
+                                }
+                                const u8* name_ptr = static_cast<const u8*>(hit);
                                 const size_t offset = static_cast<size_t>(name_ptr - buffer);
-                                if (buffer_len >= offset && buffer_len - offset >= 10 && std::memcmp(name_ptr, name, 4) == 0) {
-                                    /* Confirm it represents NameOp (0x08) and PackageOp (0x12) */
-                                    if (offset >= 1 && *(name_ptr - 1) == 0x08 && name_ptr[4] == 0x12) {
-                                        /* Scan a small window following the PackageOp for a realistic element count (32 to 255) */
-                                        for (size_t k = 5; k < 12 && buffer_len - offset > k; ++k) {
-                                            if (name_ptr[k] >= 32 && name_ptr[k] <= 255) {
-                                                return name_ptr[k];
+
+                                /* Confirm it represents NameOp (0x08), NameSeg, PackageOp (0x12), PkgLength, NumElements */
+                                if (offset >= 1 && buffer_len - offset >= 7 &&
+                                    buffer[offset - 1] == 0x08 &&
+                                    std::memcmp(name_ptr, name, 4) == 0 &&
+                                    name_ptr[4] == 0x12) {
+
+                                    size_t pkg_len = 0, hdr_len = 0;
+                                    const size_t pkg_len_pos = offset + 5;
+                                    if (decode_pkg_length(pkg_len_pos, pkg_len, hdr_len)) {
+                                        const size_t num_elem_pos = pkg_len_pos + hdr_len;
+                                        const size_t pkg_end = pkg_len_pos + pkg_len;
+                                        if (num_elem_pos < pkg_end) {
+                                            const u8 num_elements = buffer[num_elem_pos];
+                                            if (num_elements >= 32) {
+                                                return num_elements;
                                             }
                                         }
                                     }
                                 }
-                                if (buffer_len > offset + 1) {
-                                    name_ptr = static_cast<const u8*>(std::memchr(name_ptr + 1, name[0], buffer_len - (offset + 1)));
-                                }
-                                else {
-                                    name_ptr = nullptr;
-                                }
+
+                                const size_t next_off = offset + 1;
+                                search = buffer + next_off;
+                                rem = buffer_len - next_off;
                             }
                             return 0;
                         };
@@ -7275,10 +7328,10 @@ public:
                         return core::add(brand_enum::QEMU);
                     }
 
-                    /* Motherboard resources mapped via PNP0A06 generic container on designated "GPER" virtual device */
+                    /* Motherboard resources mapped via PNP0A06 generic container on designated "GPE0" or "PHPR" virtual device */
                     if (find_pattern("GPE0", 4) || find_pattern("PHPR", 4)) {
                         if (find_pattern("PNP0A06", 7)) {
-                            vma_debug("FIRMWARE: Detected QEMU resource reservation container (GPER/PHPR)");
+                            vma_debug("FIRMWARE: Detected QEMU resource reservation container (GPE0/PHPR)");
                             return core::add(brand_enum::QEMU);
                         }
                     }
@@ -7375,15 +7428,41 @@ public:
                     }
 
                     /* GPE Scope containing Name(_HID, "ACPI0006") directly */
-                    if (find_pattern("_GPE", 4) && find_pattern("ACPI0006", 8)) {
-                        /* ScopeOp (0x10), PkgLength, '_', 'G', 'P', 'E', '_', NameOp (0x08), '_', 'H', 'I', 'D', StringPrefix (0x0D), "ACPI0006" */
-                        constexpr u8 gpe_acpi0006[] = {
-                            0x10, 0x12, 0x5C, 0x2E, 0x5F, 0x47, 0x50, 0x45, 0x08, 0x5F, 0x48, 0x49, 0x44, 0x0D, 'A', 'C', 'P', 'I', '0', '0', '0', '6'
+                    {
+                        /* NameOp (0x08), '_', 'H', 'I', 'D', StringPrefix (0x0D), "ACPI0006\0" */
+                        constexpr u8 hid_acpi0006[] = {
+                            0x08, 0x5F, 0x48, 0x49, 0x44, 0x0D,
+                            'A', 'C', 'P', 'I', '0', '0', '0', '6', 0x00
                         };
-                        /* Wildcard scope container pattern */
-                        if (find_pattern(reinterpret_cast<const char*>(gpe_acpi0006 + 8), 14)) {
-                            vma_debug("FIRMWARE: Detected QEMU ACPI0006 declaration directly in GPE scope");
-                            return core::add(brand_enum::QEMU);
+
+                        for (size_t i = 0; i < buffer_len; ++i) {
+                            if (buffer[i] != 0x10) { /* ScopeOp */
+                                continue;
+                            }
+
+                            size_t pkg_len = 0, hdr_len = 0;
+                            if (!decode_pkg_length(i + 1, pkg_len, hdr_len)) {
+                                continue;
+                            }
+
+                            const size_t scope_end = i + 1 + pkg_len;
+                            size_t p = i + 1 + hdr_len;
+
+                            /* Optional RootChar ('\') before "_GPE" */
+                            if (p < scope_end && buffer[p] == 0x5C) {
+                                ++p;
+                            }
+                            if (p + 4 > scope_end || std::memcmp(buffer + p, "_GPE", 4) != 0) {
+                                continue;
+                            }
+                            p += 4;
+
+                            /* Verify Name(_HID, "ACPI0006") is directly inside Scope(_GPE) */
+                            if (p + sizeof(hid_acpi0006) <= scope_end &&
+                                std::memcmp(buffer + p, hid_acpi0006, sizeof(hid_acpi0006)) == 0) {
+                                vma_debug("FIRMWARE: Detected QEMU ACPI0006 declaration in GPE scope");
+                                return core::add(brand_enum::QEMU);
+                            }
                         }
                     }
 
@@ -7476,17 +7555,10 @@ public:
                 }
 
                 if (find_pattern(pattern, pattern_len)) {
-                    /* Special handling for BOCHS: if BXPC is detected, check if "BOCHS" is present too */
+                    /* Defer Bochs attribution until all tables are scanned (on purpose) */
                     if (strcmp(pattern, "BXPC") == 0) {
-                        constexpr char bochs[] = "BOCHS";
-                        constexpr size_t bochs_len = sizeof(bochs) - 1;
-                        if (!find_pattern(bochs, bochs_len)) {
-                            vma_debug("FIRMWARE: BOCHS detected");
-                            return core::add(brand_enum::BOCHS);
-                        }
-                        else {
-                            continue;
-                        }
+                        saw_bochs_acpi_oem = true;
+                        continue;
                     }
 
                     vma_debug("FIRMWARE: Detected ", pattern);
@@ -7547,7 +7619,7 @@ public:
                         if (subtable_len < 4 || subtable_len > buffer_len - offset) {
                             break;
                         }
-              
+
                         offset += subtable_len;
                     }
                 }
@@ -7858,6 +7930,11 @@ public:
             }
         }
     #endif
+
+        if (saw_bochs_acpi_oem) {
+            vma_debug("FIRMWARE: BOCHS detected");
+            return core::add(brand_enum::BOCHS);
+        }
 
         return false;
     }
