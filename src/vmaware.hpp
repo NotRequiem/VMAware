@@ -7061,8 +7061,10 @@ public:
                     dsdt_oem_id[6] = '\0';
                 }
 
+                const bool is_aml_table = (std::memcmp(header.signature, "DSDT", 4) == 0) || (std::memcmp(header.signature, "SSDT", 4) == 0);
+
                 /* 1) AML Bytecode inspection */
-                {
+                if (is_aml_table) {
                     /*
                      * OperationRegion (DBG, SystemIO, 0x0402, One)
                      * AML byte sequence: ExtOpPrefix (0x5B), OpRegionOp (0x80), 'D', 'B', 'G', '_' (0x5F padding), SystemIO (0x01), WordPrefix (0x0B), 0x02, 0x04, One (0x01)
@@ -7244,8 +7246,75 @@ public:
                     /* Zeroed S5 Sleep State SLP_TYP package */
                     {
                         /* NameOp (0x08), '_', 'S', '5', '_', PackageOp (0x12), PkgLength (0x06), NumElements (0x04), Zero, Zero, Zero, Zero */
-                        constexpr u8 qemu_s5_sig[] = { 0x08, 0x5F, 0x53, 0x35, 0x5F, 0x12, 0x06, 0x04, 0x00, 0x00, 0x00, 0x00 };
-                        if (find_pattern(reinterpret_cast<const char*>(qemu_s5_sig), sizeof(qemu_s5_sig))) {
+                        auto match_zeroed_s5 = [&]() noexcept -> bool {
+                            if (std::memcmp(header.oem_id, "BOCHS ", 6) == 0) {
+                                return false;
+                            }
+
+                            size_t i = 0;
+                            while (i + 10 <= buffer_len) {
+                                const void* hit = std::memchr(buffer + i, 0x08, buffer_len - i); /* NameOp */
+                                if (!hit) {
+                                    return false;
+                                }
+
+                                const size_t pos = static_cast<const u8*>(hit) - buffer;
+                                size_t p = pos + 1;
+
+                                /* Optional RootChar ('\') followed by "_S5_" */
+                                if (p < buffer_len && buffer[p] == 0x5C) {
+                                    ++p;
+                                }
+                                if (p + 7 > buffer_len || std::memcmp(buffer + p, "_S5_", 4) != 0) {
+                                    i = pos + 1;
+                                    continue;
+                                }
+                                p += 4;
+
+                                /* PackageOp (0x12), 1-byte PkgLength (< 0x40), NumElements (2..4) */
+                                if (buffer[p] != 0x12) {
+                                    i = pos + 1;
+                                    continue;
+                                }
+                                const u8 pkg_len = buffer[p + 1];
+                                const u8 num_elem = buffer[p + 2];
+
+                                if (pkg_len < 4 || pkg_len >= 0x40 || num_elem < 2 || num_elem > 4) {
+                                    i = pos + 1;
+                                    continue;
+                                }
+                                if (p + 1 + pkg_len > buffer_len) {
+                                    i = pos + 1;
+                                    continue;
+                                }
+
+                                size_t cur = p + 3;
+                                const size_t pkg_end = p + 1 + pkg_len;
+                                bool all_zero = true;
+
+                                for (u8 e = 0; e < num_elem; ++e) {
+                                    if (cur < pkg_end && buffer[cur] == 0x00) { /* ZeroOp */
+                                        ++cur;
+                                    }
+                                    else if (cur + 1 < pkg_end && buffer[cur] == 0x0A && buffer[cur + 1] == 0x00) { /* BytePrefix 0x00 */
+                                        cur += 2;
+                                    }
+                                    else {
+                                        all_zero = false;
+                                        break;
+                                    }
+                                }
+
+                                if (all_zero && cur == pkg_end) {
+                                    return true;
+                                }
+
+                                i = pos + 1;
+                            }
+                            return false;
+                        };
+
+                        if (match_zeroed_s5()) {
                             vma_debug("FIRMWARE: Detected QEMU zeroed _S5 SLP_TYP package");
                             return core::add(brand_enum::QEMU);
                         }
