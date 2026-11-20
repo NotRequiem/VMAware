@@ -15295,7 +15295,7 @@ inline const std::array<VM::core::technique, VM::enum_size + 1>& VM::core::get_t
             { VM::MEASURED_BOOT,{ 150, VM::measured_boot } },
             { VM::INTERRUPT_SHADOW,{ 150, VM::interrupt_shadow } },
             { VM::EIP_OVERFLOW,{ 150, VM::eip_overflow } },
-            { VM::SINGLE_STEP,{ 150, VM::single_step } },
+            { VM::SINGLE_STEP,{ 100, VM::single_step } },
             { VM::TPM,{ 45, VM::tpm } },
             { VM::VCPU_SCHEDULING,{ 100, VM::vcpu_scheduling } },
             { VM::NVRAM,{ 100, VM::nvram } },
