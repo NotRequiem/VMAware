@@ -13742,8 +13742,9 @@ public:
             const bool is_lenovo = string::contains_ci(manufacturer, "LENOVO");
             const bool is_hp = string::contains_ci(manufacturer, "HP") || string::contains_ci(manufacturer, "Hewlett-Packard");
             const bool is_acer = string::contains_ci(manufacturer, "Acer");
+            const bool is_dell = string::contains_ci(manufacturer, "Dell");
 
-            if (is_lenovo || is_hp || is_acer) {
+            if (is_lenovo || is_hp || is_acer || is_dell) {
                 vma_debug("TPM: Recognized OEM manufacturer which normally manufactures buggy firmware, skipping PCR mismatch check.");
                 free_resources();
                 return false;
@@ -13753,7 +13754,14 @@ public:
         /* Get raw log size and allocate log buffer */
         u32 log_size = 0;
         const TBS_RESULT hr_log_sz = p_tbsi_get_tcg_log_ex(0, nullptr, &log_size);
-        if (hr_log_sz != 0x80284005 && hr_log_sz != 0) {
+        if ((hr_log_sz != 0x80284005 && hr_log_sz != 0) || log_size == 0) {
+            free_resources();
+            return false;
+        }
+
+        u32 boot_log_size = 0;
+        const TBS_RESULT hr_boot_sz = p_tbsi_get_tcg_log_ex(2, nullptr, &boot_log_size); /* TBS_TCGLOG_SRTM_BOOT */
+        if ((hr_boot_sz != 0x80284005 && hr_boot_sz != 0) || boot_log_size != log_size) {
             free_resources();
             return false;
         }
@@ -13766,6 +13774,22 @@ public:
 
         const TBS_RESULT hr_log_rd = p_tbsi_get_tcg_log_ex(0, log_buffer, &log_size);
         if (hr_log_rd != 0) {
+            free_resources();
+            return false;
+        }
+
+        u8* const boot_log_buffer = static_cast<u8*>(std::malloc(boot_log_size));
+        if (!boot_log_buffer) {
+            free_resources();
+            return false;
+        }
+
+        const TBS_RESULT hr_boot_rd = p_tbsi_get_tcg_log_ex(2, boot_log_buffer, &boot_log_size);
+        const bool logs_match = (hr_boot_rd == 0) && (boot_log_size == log_size) && (std::memcmp(log_buffer, boot_log_buffer, log_size) == 0);
+        std::free(boot_log_buffer);
+
+        if (!logs_match) {
+            vma_debug("TPM: Current TCG log differs from clean boot log (sleep/hibernate resume), skipping PCR mismatch check.");
             free_resources();
             return false;
         }
@@ -13936,11 +13960,24 @@ public:
             std::memcpy(reconstructed_pcrs[pcr_idx], current_pcr, 32);
         }
 
+        auto is_uniform_byte = [](const u8* const buf, const u32 len, const u8 val) noexcept -> bool {
+            for (u32 i = 0; i < len; ++i) {
+                if (buf[i] != val) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
         /* Compare logs with active system registers */
         for (u32 pcr_idx = 0; pcr_idx < 8; ++pcr_idx) {
             u8 actual_pcr[32] = { 0 };
             u32 actual_pcr_size = 0;
             if (read_tpm_pcr(h_tbs_context, pcr_idx, 0x000B, actual_pcr, &actual_pcr_size)) {
+                if (actual_pcr_size == 32 &&
+                    (is_uniform_byte(actual_pcr, 32, 0x00) || is_uniform_byte(actual_pcr, 32, 0xFF))) {
+                    continue;
+                }
                 if (actual_pcr_size != 32 || std::memcmp(actual_pcr, reconstructed_pcrs[pcr_idx], 32) != 0) {
                     if (pcr_idx != 0 && pcr_idx != 6) {
                         vma_debug("TPM: Detected mismatch on hardware PCR ", pcr_idx);
