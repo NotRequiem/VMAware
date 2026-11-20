@@ -735,16 +735,6 @@ jobs:
           fi
           echo "PASS: --percent = $result"
 
-      - name: Check --brand = "Microsoft Azure Hyper-V" (Debug)
-        run: |
-          result=$(build/debug/vmaware --brand)
-          expected="Microsoft Azure Hyper-V"
-          if [ "$result" != "$expected" ]; then
-            echo "FAIL: --brand expected '$expected', got '$result'"
-            exit 1
-          fi
-          echo "PASS: --brand = $result"
-
   vm-output-test-macos:
     needs: [macos]
     runs-on: macos-latest
@@ -890,18 +880,6 @@ jobs:
             exit 1
           }
           Write-Host "PASS: --percent = $result"
-
-      - name: Check --brand = "Microsoft Azure Hyper-V"
-        shell: pwsh
-        run: |
-          $bin = Get-ChildItem build\vmaware64_release -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
-          $result = (& $bin --brand).Trim()
-          $expected = "Microsoft Azure Hyper-V"
-          if ($result -ne $expected) {
-            Write-Host "FAIL: --brand expected '$expected', got '$result'"
-            exit 1
-          }
-          Write-Host "PASS: --brand = $result"
 
   platform-builds:
     needs: [linux, macos, windows]

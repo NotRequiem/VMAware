@@ -3548,7 +3548,7 @@ public:
 
                     size_t offset = first_event_size;
 
-                    constexpr const wchar_t* wide_targets[] = {
+                    static constexpr const wchar_t* wide_targets[] = {
                         L"hvix64.exe",      /* Intel x64 Hypervisor */
                         L"hvax64.exe",      /* AMD x64 Hypervisor */
                         L"hvaa64.exe",      /* ARM64 Hypervisor */
@@ -3564,7 +3564,7 @@ public:
                         L"hiberrsm.exe"     /* Hibernation Resume */
                     };
 
-                    constexpr const char* narrow_targets[] = {
+                    static constexpr const char* narrow_targets[] = {
                         "hvix64.exe",
                         "hvax64.exe",
                         "hvaa64.exe",
