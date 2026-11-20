@@ -2244,7 +2244,6 @@ public:
                      sync = *counter_ptr;
                      while (*counter_ptr == sync);
                      sync = *counter_ptr;
-                     VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
                      while (*counter_ptr == sync);
 
                      r_pre = *counter_ptr;
@@ -2256,7 +2255,6 @@ public:
                      sync = *counter_ptr;
                      while (*counter_ptr == sync);
                      sync = *counter_ptr;
-                     VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
                      while (*counter_ptr == sync);
 
                      v_pre = *counter_ptr;
@@ -5385,7 +5383,6 @@ public:
                     sync = *counter_ptr;
                     while (*counter_ptr == sync);
                     sync = *counter_ptr;
-                    VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
                     while (*counter_ptr == sync);
 
                     db_pre = *counter_ptr;
@@ -5397,7 +5394,6 @@ public:
                     sync = *counter_ptr;
                     while (*counter_ptr == sync);
                     sync = *counter_ptr;
-                    VMAWARE_PREFETCH(counter_ptr, _MM_HINT_T0);
                     while (*counter_ptr == sync);
 
                     ctx.ContextFlags = CONTEXT_FULL;
