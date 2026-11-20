@@ -15118,7 +15118,7 @@ inline const std::array<VM::core::technique, VM::enum_size + 1>& VM::core::get_t
             { VM::WINE,{ 150, VM::wine } },
             { VM::DBVM,{ 150, VM::dbvm } },
             { VM::UD,{ 100, VM::ud } },
-            { VM::DRIVERS,{ 100, VM::drivers } },
+            { VM::DRIVERS,{ 50, VM::drivers } },
             { VM::HANDLES,{ 100, VM::device_handles } },
             { VM::KERNEL_OBJECTS,{ 100, VM::kernel_objects } },
             { VM::EMULATION,{ 100, VM::emulation } },
