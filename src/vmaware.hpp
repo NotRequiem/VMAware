@@ -7009,7 +7009,7 @@ public:
             "innotek",            "Oracle",   "VirtualBox", "vbox", "VBOX",
             "VMware, Inc.",       "VMware",   "VMWARE",     "VMW0003",
             "QEMU",               "pc-q35",   "Q35 +",      
-            "ovmf",               "edk ii unknown", "WAET", "S3 Corp.", "VS2005R2",
+            "OVMF",               "EDK II", "WAET", "S3 Corp.", "VS2005R2",
             "BXPC",               "Xen"
         } };
 
@@ -7066,6 +7066,36 @@ public:
                     remaining_bytes = (consumed <= buffer_len) ? (buffer_len - consumed) : 0;
                 }
                 return false;
+            };
+
+            /* 
+             * Decodes ACPI AML PkgLength at pos
+             * Sets pkg_total_len (total bytes including the PkgLength field itself) and hdr_len (1..4) 
+             */
+            auto decode_pkg_length = [&](const size_t pos, size_t& pkg_total_len, size_t& hdr_len) noexcept -> bool {
+                if (pos >= buffer_len) {
+                    return false;
+                }
+                const u8 lead = buffer[pos];
+                const size_t byte_count = (lead >> 6) & 0x03u;
+                hdr_len = 1 + byte_count;
+                if (hdr_len > buffer_len - pos) {
+                    return false;
+                }
+                if (byte_count == 0) {
+                    pkg_total_len = lead & 0x3Fu;
+                }
+                else {
+                    if ((lead & 0x30u) != 0) { /* According to ACPI spec.. bits 5..4 must be 0 when byte_count > 0 */
+                        return false;
+                    }
+                    size_t val = lead & 0x0Fu;
+                    for (size_t i = 0; i < byte_count; ++i) {
+                        val |= static_cast<size_t>(buffer[pos + 1 + i]) << (4u + 8u * i);
+                    }
+                    pkg_total_len = val;
+                }
+                return pkg_total_len >= hdr_len && pkg_total_len <= (buffer_len - pos);
             };
 
             if (!buffer) {
@@ -7125,41 +7155,47 @@ public:
                         return core::add(brand_enum::QEMU);
                     }
 
-                    /* QEMU System Management Interrupt Resources/Interface Reservation string or wildcard _UID and PNP0A06 device association */
-                    if (find_pattern("SMI resources", 13) || find_pattern("SMI interface", 13)) {
-                        vma_debug("FIRMWARE: Detected QEMU SMI Resources reservation string");
-                        return core::add(brand_enum::QEMU);
-                    }
-                    else {
-                        constexpr u8 pnp0a06_eisa[] = { 0x0C, 0x41, 0xD0, 0x0A, 0x06 }; /* EISAID("PNP0A06") */
-                        constexpr u8 uid_signature[] = { 0x08, 0x5F, 0x55, 0x49, 0x44 }; /* NameOp (0x08) + "_UID" */
+                    /* QEMU System Management Interrupt Resources Reservation string or wildcard _UID and PNP0A06 device association */
+                    for (size_t i = 0; i + 2 <= buffer_len; ++i) {
+                        if (buffer[i] != 0x5B || buffer[i + 1] != 0x82) {
+                            continue;
+                        }
 
-                        /* Simple search helper for pnp0a06_eisa sequence */
-                        auto find_eisa = [&]() noexcept -> const u8* {
-                            if (buffer_len < sizeof(pnp0a06_eisa)) return nullptr;
-                            for (size_t i = 0; i <= buffer_len - sizeof(pnp0a06_eisa); ++i) {
-                                if (std::memcmp(buffer + i, pnp0a06_eisa, sizeof(pnp0a06_eisa)) == 0) {
-                                    return buffer + i;
+                        size_t pkg_len = 0, hdr_len = 0;
+                        if (!decode_pkg_length(i + 2, pkg_len, hdr_len)) {
+                            continue;
+                        }
+
+                        const size_t dev_start = i + 2 + hdr_len;
+                        const size_t dev_end = i + 2 + pkg_len;
+                        if (dev_start >= dev_end) {
+                            continue;
+                        }
+
+                        constexpr u8 hid_eisa_pnp0a06[] = { 0x08, 0x5F, 0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0A, 0x06 };
+                        constexpr u8 hid_str_pnp0a06[] = { 0x08, 0x5F, 0x48, 0x49, 0x44, 0x0D, 'P', 'N', 'P', '0', 'A', '0', '6', 0x00 };
+                        constexpr u8 uid_smi_prefix[] = { 0x08, 0x5F, 0x55, 0x49, 0x44, 0x0D, 'S', 'M', 'I' };
+
+                        bool has_pnp0a06_hid = false;
+                        bool has_smi_uid = false;
+
+                        for (size_t p = dev_start; p < dev_end; ++p) {
+                            const size_t rem = dev_end - p;
+                            if (!has_pnp0a06_hid) {
+                                if ((rem >= sizeof(hid_eisa_pnp0a06) &&
+                                    std::memcmp(buffer + p, hid_eisa_pnp0a06, sizeof(hid_eisa_pnp0a06)) == 0) ||
+                                    (rem >= sizeof(hid_str_pnp0a06) &&
+                                        std::memcmp(buffer + p, hid_str_pnp0a06, sizeof(hid_str_pnp0a06)) == 0)) {
+                                    has_pnp0a06_hid = true;
                                 }
                             }
-                            return nullptr;
-                        };
-
-                        const u8* pnp_ptr = find_eisa();
-                        if (pnp_ptr) {
-                            const size_t pnp_offset = static_cast<size_t>(pnp_ptr - buffer);
-                            /* Search for the _UID name declaration within a 128-byte scope surrounding the HID */
-                            const size_t search_start = pnp_offset >= 64 ? pnp_offset - 64 : 0;
-                            const size_t search_end = (buffer_len - pnp_offset >= 64) ? pnp_offset + 64 : buffer_len;
-
-                            for (size_t i = search_start; search_end >= 8 && i <= search_end - 8; ++i) {
-                                if (std::memcmp(buffer + i, uid_signature, sizeof(uid_signature)) == 0) {
-                                    /* Check if the _UID value is a string (represented by 0x0D StringPrefix in AML) starting with "SM" */
-                                    if (buffer[i + 5] == 0x0D && buffer[i + 6] == 'S' && buffer[i + 7] == 'M') {
-                                        vma_debug("FIRMWARE: Detected QEMU generic device containing SMI string unique identifier");
-                                        return core::add(brand_enum::QEMU);
-                                    }
-                                }
+                            if (!has_smi_uid && rem >= sizeof(uid_smi_prefix) &&
+                                std::memcmp(buffer + p, uid_smi_prefix, sizeof(uid_smi_prefix)) == 0) {
+                                has_smi_uid = true;
+                            }
+                            if (has_pnp0a06_hid && has_smi_uid) {
+                                vma_debug("FIRMWARE: Detected QEMU PNP0A06 device with SMI _UID inside Device boundary");
+                                return core::add(brand_enum::QEMU);
                             }
                         }
                     }
@@ -7240,18 +7276,11 @@ public:
                     }
 
                     /* Motherboard resources mapped via PNP0A06 generic container on designated "GPER" virtual device */
-                    if (find_pattern("GPER", 4) || find_pattern("PHPR", 4)) {
+                    if (find_pattern("GPE0", 4) || find_pattern("PHPR", 4)) {
                         if (find_pattern("PNP0A06", 7)) {
                             vma_debug("FIRMWARE: Detected QEMU resource reservation container (GPER/PHPR)");
                             return core::add(brand_enum::QEMU);
                         }
-                    }
-
-                    /* QEMU dummy SATA controller named D0FA on Device 31, Function 2 */
-                    constexpr u8 sata_addr_dummy[] = { 0x08, 0x5F, 0x41, 0x44, 0x52, 0x0C, 0x02, 0x00, 0x1F, 0x00 };
-                    if (find_pattern("D0FA", 4) && find_pattern(reinterpret_cast<const char*>(sata_addr_dummy), sizeof(sata_addr_dummy))) {
-                        vma_debug("FIRMWARE: Detected QEMU dummy SATA controller named D0FA on Device 31, Function 2");
-                        return core::add(brand_enum::QEMU);
                     }
 
                     /* Interrupt query helpers */
@@ -7273,7 +7302,7 @@ public:
                         /* NameOp (0x08), '_', 'S', '5', '_', PackageOp (0x12), PkgLength (0x06), NumElements (0x04), Zero, Zero, Zero, Zero */
                         auto match_zeroed_s5 = [&]() noexcept -> bool {
                             if (std::memcmp(header.oem_id, "BOCHS ", 6) == 0) {
-                                return false;
+                                return true;
                             }
 
                             size_t i = 0;
@@ -7354,16 +7383,6 @@ public:
                         /* Wildcard scope container pattern */
                         if (find_pattern(reinterpret_cast<const char*>(gpe_acpi0006 + 8), 14)) {
                             vma_debug("FIRMWARE: Detected QEMU ACPI0006 declaration directly in GPE scope");
-                            return core::add(brand_enum::QEMU);
-                        }
-                    }
-
-                    /* Q35 MMCONFIG reservation device named MCFG with PNP0C01 */
-                    if (find_pattern("MCFG", 4) && find_pattern("PNP0C01", 7)) {
-                        /* DeviceOp (0x5B, 0x82), PkgLength, 'M', 'C', 'F', 'G', NameOp (0x08), '_', 'H', 'I', 'D' */
-                        constexpr u8 mcfg_dev[] = { 'M', 'C', 'F', 'G', 0x08, 0x5F, 0x48, 0x49, 0x44, 0x0D, 'P', 'N', 'P', '0', 'C', '0', '1' };
-                        if (find_pattern(reinterpret_cast<const char*>(mcfg_dev), sizeof(mcfg_dev))) {
-                            vma_debug("FIRMWARE: Detected QEMU Q35 MMCONFIG reservation device named MCFG");
                             return core::add(brand_enum::QEMU);
                         }
                     }
@@ -7503,10 +7522,6 @@ public:
             if (is_acpi) {
                 /* 4) FADT structure limits validation */
                 if (std::memcmp(header.signature, "FACP", 4) == 0) {
-                    if (header.length > buffer_len) {
-                        vma_debug("FIRMWARE: declared header length larger than fetched length (declared ", header.length, ", fetched ", buffer_len, ")");
-                        return true;
-                    }
                     if (buffer_len < sizeof(fadt_table) || header.length < sizeof(fadt_table)) {
                         return false;
                     }
@@ -7532,41 +7547,7 @@ public:
                         if (subtable_len < 4 || subtable_len > buffer_len - offset) {
                             break;
                         }
-
-                        /* Subtable type 0x0000 is DRHD(Hardware Unit Definition) */
-                        if (subtable_type == 0x0000 && subtable_len >= 16) {
-                            size_t scope_offset = offset + 16;
-                            const size_t scope_end = offset + subtable_len;
-
-                            while (scope_end >= 6 && scope_offset <= scope_end - 6) {
-                                const u8 scope_type = buffer[scope_offset];
-                                const u8 scope_len = buffer[scope_offset + 1];
-
-                                if (scope_len < 6 || scope_len > scope_end - scope_offset) {
-                                    break;
-                                }
-
-                                const u8 bus_num = buffer[scope_offset + 5];
-
-                                /* QEMU / KVM maps the virtual IOAPIC to Bus 0xFF */
-                                if (scope_type == 0x03 && bus_num == 0xFF) {
-                                    vma_debug("FIRMWARE: DMAR IOAPIC mapped to invalid bus 0xFF (QEMU signature)");
-                                    return core::add(brand_enum::QEMU);
-                                }
-
-                                /* Declaring Device 2 as a PCI Bridge(Type 02) is a topology conflict on Intel which reserves this for IGD */
-                                if (scope_type == 0x02 && scope_len >= 8 && bus_num == 0x00) { /* PCI Bridge Device */
-                                    const u8 dev_num = buffer[scope_offset + 6];
-                                    const u8 func_num = buffer[scope_offset + 7];
-                                    if (dev_num == 0x02 && func_num == 0x00) {
-                                        vma_debug("FIRMWARE: DMAR PCI Bridge on invalid Device 0x02 (QEMU root port signature)");
-                                        return core::add(brand_enum::QEMU);
-                                    }
-                                }
-
-                                scope_offset += scope_len;
-                            }
-                        }
+              
                         offset += subtable_len;
                     }
                 }
