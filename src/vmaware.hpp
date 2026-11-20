@@ -2326,6 +2326,14 @@ public:
 
     /* Memory related functions */
     struct memory {
+        struct fault_info {
+            DWORD code = 0;
+            DWORD num_params = 0;
+            ULONG_PTR access_type = 0; /* ExceptionInformation[0]: 0=read, 1=write, 8=DEP */
+            ULONG_PTR fault_addr = 0;  /* ExceptionInformation[1]: faulting address (CR2) */
+            ULONG_PTR insn_addr = 0;   /* ExceptionAddress: faulting RIP/EIP */
+        };
+
         /* Uninstrumented indirect-call invokers */
         VMAWARE_NO_CFG static void execute(const void* pointer) noexcept {
             if (pointer == nullptr) {
@@ -2380,14 +2388,35 @@ public:
             return exception_status;
         }
 
-        inline static DWORD execute_handler(const void* pointer) noexcept {
+        static LONG record_fault(const EXCEPTION_POINTERS* ep, fault_info* out_info) noexcept {
+            if (out_info && ep && ep->ExceptionRecord) {
+                const EXCEPTION_RECORD* rec = ep->ExceptionRecord;
+                out_info->code = rec->ExceptionCode;
+                out_info->num_params = rec->NumberParameters;
+                out_info->insn_addr = reinterpret_cast<ULONG_PTR>(rec->ExceptionAddress);
+                if (rec->NumberParameters >= 2) {
+                    out_info->access_type = rec->ExceptionInformation[0];
+                    out_info->fault_addr = rec->ExceptionInformation[1];
+                }
+            }
+            return EXCEPTION_EXECUTE_HANDLER;
+        }
+
+        inline static DWORD execute_handler(const void* pointer, fault_info* out_info = nullptr) noexcept {
+            if (out_info) {
+                *out_info = {};
+            }
             DWORD exception_status = 0;
             __try {
                 execute(pointer);
             }
-            __except (exception_status = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {}
+            __except (
+                exception_status = GetExceptionCode(),
+                record_fault(GetExceptionInformation(), out_info)
+                ) {
+            }
             return exception_status;
-        };
+        }
 
         static inline void get_function(
             const HMODULE module,
@@ -12476,26 +12505,47 @@ public:
         }
 
         const void* stubs[2] = { vmcall_stub, vmmcall_stub };
-        bool is_kvm_detected = false;
+        const bool is_intel = cpu::is_intel();
+        const bool is_amd = cpu::is_amd();
 
         for (int i = 0; i < 2; ++i) {
-            const DWORD exception_status = memory::execute_handler(stubs[i]);
+            memory::fault_info info{};
+            const DWORD exception_status = memory::execute_handler(stubs[i], &info);
             const bool fault_hit = (exception_status != 0);
 
             if (!fault_hit) {
                 /* If no exception occurs, then a hypervisor intercepted and handled it. Default behavior on latest KVM */
-                is_kvm_detected = true;
                 vma_debug("KVM_INTERCEPTION: Detected a hypervisor intercepting hypercalls");
+                return true;
             }
-            else if (exception_status == EXCEPTION_ACCESS_VIOLATION || exception_status == EXCEPTION_IN_PAGE_ERROR) {
-                /* Expected #UD became a page-fault-related exception instead. KVM's instruction patching quirk is present. Only occurs on old KVM */
-                vma_debug("KVM_INTERCEPTION: Detected KVM attempting to patch instructions on the fly");
-                is_kvm_detected = true;
-                break;
+
+            /* Cross-vendor hypercall patching quirk only applies to VMMCALL on Intel or VMCALL on AMD */
+            const bool is_cross_vendor =
+                (i == 1 && is_intel) ||
+                (i == 0 && is_amd);
+
+            if (is_cross_vendor &&
+                (exception_status == EXCEPTION_ACCESS_VIOLATION || exception_status == EXCEPTION_IN_PAGE_ERROR)) {
+                /*
+                 * KVM_X86_QUIRK_FIX_HYPERCALL_INSN attempts a 3-byte write over the faulting
+                 * instruction itself, producing a write #PF (ExceptionInformation[0] == 1)
+                 * whose CR2 (ExceptionInformation[1]) falls within [ExceptionAddress, ExceptionAddress + 3).
+                 * Comparing against insn_addr also stays accurate under MSVC /INCREMENTAL ILT thunks.
+                 */
+                const bool is_write_pf = (info.num_params >= 2) && (info.access_type == 1);
+                const bool fault_at_insn =
+                    (info.insn_addr != 0) &&
+                    (info.fault_addr >= info.insn_addr) &&
+                    (info.fault_addr < info.insn_addr + 3);
+
+                if (is_write_pf && fault_at_insn) {
+                    vma_debug("KVM_INTERCEPTION: Detected KVM attempting to patch instructions on the fly");
+                    return true;
+                }
             }
         }
 
-        return is_kvm_detected;
+        return false;
     #endif
     }
 
