@@ -12886,21 +12886,22 @@ public:
             return false; /* AMD CPUs only #UD if SVM is not active */
         }
 
-        /* 
-         * If we reach here, it means:
-         * 1. An exception was triggered, since we're executing at CPL3
-         * 2. That exception was not #UD, because the code would have returned in the branch above
-         * 3. EFER.SVME is 1, because the exception was not #UD, so SVM is active
-         * 
-         * If CPUID says SVM is not active (!svm_visible), it contradicts EFER.SVME being 1, it's a red flag
-         * If there was no exception at all (!fault_hit), it contradicts our current CPL3 privilege, it's a red flag
+        const bool is_gp =
+            (exception_status == EXCEPTION_ACCESS_VIOLATION) ||
+            (exception_status == EXCEPTION_PRIV_INSTRUCTION);
+
+        /*
+         * 1. If no exception occurred (!fault_hit), a hypervisor intercepted VMLOAD at CPL3
+         * 2. If CPUID says SVM is not active (!svm_visible) yet VMLOAD raised #GP instead of #UD,
+         *    a hypervisor leaked EFER.SVME = 1 into the guest context
          */
-        if (!svm_visible || !fault_hit) { /* Hypervisor spoofed call, buggy firmware, or AMD server CPU */
+        if (!fault_hit || (!svm_visible && is_gp)) {
             vma_debug("SVM_EXCEPTIONS: Detected SVM hypervisor hiding CPU capabilities");
             return core::add(brand_enum::NULL_BRAND, 150);
         }
 
-        return true; /* If we reach here, we're sure an exception occurs (fault_hit is true), but was not #UD (must be a #GP), confirming EFER.SVME being 1 */
+        /* svm_visible == true with #GP just means EFER.SVME is enabled on the host */
+        return false;
     #else
         return false;
     #endif  
@@ -15291,7 +15292,7 @@ inline const std::array<VM::core::technique, VM::enum_size + 1>& VM::core::get_t
         #if (VMAWARE_WINDOWS)
             { VM::TRAP,{ 150, VM::trap } },
             { VM::KVM_INTERCEPTION,{ 150, VM::kvm_interception } },
-            { VM::SVM_EXCEPTIONS,{ 35, VM::svm_exceptions } },
+            { VM::SVM_EXCEPTIONS,{ 95, VM::svm_exceptions } },
             { VM::MEASURED_BOOT,{ 150, VM::measured_boot } },
             { VM::INTERRUPT_SHADOW,{ 150, VM::interrupt_shadow } },
             { VM::EIP_OVERFLOW,{ 150, VM::eip_overflow } },
