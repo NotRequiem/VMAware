@@ -92,6 +92,7 @@ static bool are_perms_required(const VM::enum_flags flag) {
         case VM::QEMU_USB:
         case VM::KMSG:
         case VM::SMBIOS_VM_BIT:
+        case VM::MMIO_EVEX:
         case VM::NVRAM: return true;
         default: return false;
     }
@@ -561,6 +562,7 @@ void general(bool high_threshold, bool all, bool dynamic, const char* output_fil
     checker(VM::WINE, "Wine");
     checker(VM::HWMODEL, "hw.model");
     checker(VM::PROCESSES, "processes");
+    checker(VM::MMIO_EVEX, "EVEX MMIO #UD");
     checker(VM::LINUX_USER_HOST, "default Linux user/host");
     checker(VM::GAMARUE, "gamarue ransomware technique");
     checker(VM::BOCHS_CPU, "BOCHS CPU techniques");
