@@ -946,28 +946,28 @@ public:
     VM(VM&&) = delete;
 
     /* Compile-time checks */
-    static_assert(std::is_integral<brand_score_t>::value, "brand_score_t must map to an integral type.");
-    static_assert(enum_size == MULTIPLE, "enum_size must match the terminal element of the enum_flags.");
-    static_assert(MAX_BRANDS == static_cast<size_t>(brand_enum::NULL_BRAND) + 1, "MAX_BRANDS must account for all elements including NULL_BRAND.");
-    static_assert(enum_begin == 0, "enum_begin must start at 0.");
-    static_assert(enum_end == enum_size + 1, "enum_end boundary calculation mismatch.");
-    static_assert(technique_end == DEFAULT, "technique_end must match the transition point to settings flags.");
-    static_assert(settings_begin == DEFAULT, "settings_begin must align with the transition point.");
-    static_assert(settings_end == enum_end, "settings_end must align with the end of the flags.");
+    static_assert(std::is_integral<brand_score_t>::value, "VMAware: brand_score_t must map to an integral type.");
+    static_assert(enum_size == MULTIPLE, "VMAware: enum_size must match the terminal element of the enum_flags.");
+    static_assert(MAX_BRANDS == static_cast<size_t>(brand_enum::NULL_BRAND) + 1, "VMAware: MAX_BRANDS must account for all elements including NULL_BRAND.");
+    static_assert(enum_begin == 0, "VMAware: enum_begin must start at 0.");
+    static_assert(enum_end == enum_size + 1, "VMAware: enum_end boundary calculation mismatch.");
+    static_assert(technique_end == DEFAULT, "VMAware: technique_end must match the transition point to settings flags.");
+    static_assert(settings_begin == DEFAULT, "VMAware: settings_begin must align with the transition point.");
+    static_assert(settings_end == enum_end, "VMAware: settings_end must align with the end of the flags.");
 
-    static_assert(static_cast<u8>(brand_enum::NULL_BRAND) > 0, "brand_enum must contain at least one element.");
-    static_assert(threshold_score > 0, "threshold_score must be a positive non-zero value.");
-    static_assert(high_threshold_score >= threshold_score, "high_threshold_score cannot be less than base threshold.");
-    static_assert(MAX_CUSTOM_TECHNIQUES > 0, "MAX_CUSTOM_TECHNIQUES must allow storage for at least one routine.");
-    static_assert(WINDOWS_START < WINDOWS_END, "WINDOWS range bounds are logically inverted.");
-    static_assert(LINUX_START < LINUX_END, "LINUX range bounds are logically inverted.");
-    static_assert(MACOS_START < MACOS_END, "MACOS range bounds are logically inverted.");
+    static_assert(static_cast<u8>(brand_enum::NULL_BRAND) > 0, "VMAware: brand_enum must contain at least one element.");
+    static_assert(threshold_score > 0, "VMAware: threshold_score must be a positive non-zero value.");
+    static_assert(high_threshold_score >= threshold_score, "VMAware: high_threshold_score cannot be less than base threshold.");
+    static_assert(MAX_CUSTOM_TECHNIQUES > 0, "VMAware: MAX_CUSTOM_TECHNIQUES must allow storage for at least one routine.");
+    static_assert(WINDOWS_START < WINDOWS_END, "VMAware: WINDOWS range bounds are logically inverted.");
+    static_assert(LINUX_START < LINUX_END, "VMAware: LINUX range bounds are logically inverted.");
+    static_assert(MACOS_START < MACOS_END, "VMAware: MACOS range bounds are logically inverted.");
 
-    static_assert(version_minor < 100, "version_minor must be < 100 to fit in version_code");
-    static_assert(version_patch < 100, "version_patch must be < 100 to fit in version_code");
-    static_assert(version != nullptr && version[0] != '\0', "version string cannot be empty");
-    static_assert(version[0] >= '0' && version[0] <= '9', "version string must start with a digit (use '2.8.2', do not include 'v')");
-    static_assert(version_major >= 10 || version[0] == static_cast<char>('0' + version_major), "Mismatch: the first character of version string does not match version_major");
+    static_assert(version_minor < 100, "VMAware: version_minor must be < 100 to fit in version_code");
+    static_assert(version_patch < 100, "VMAware: version_patch must be < 100 to fit in version_code");
+    static_assert(version != nullptr && version[0] != '\0', "VMAware: version string cannot be empty");
+    static_assert(version[0] >= '0' && version[0] <= '9', "VMAware: version string must start with a digit (use '2.8.2', do not include 'v')");
+    static_assert(version_major >= 10 || version[0] == static_cast<char>('0' + version_major), "VMAware: The first character of version string does not match version_major");
 
     #define VMAWARE_TECHNIQUE [[nodiscard]] static vmaware_technique
 
@@ -1418,7 +1418,7 @@ public:
 
     template <std::size_t N>
     static inline void str_copy(char(&dest)[N], const char* VMAWARE_RESTRICT src) noexcept {
-        static_assert(N > 0, "Destination buffer must have non-zero size");
+        static_assert(N > 0, "VMAware: Destination buffer must have non-zero size");
 
         if (!src) {
             dest[0] = '\0';
@@ -5155,8 +5155,8 @@ public:
             SetThreadPriorityBoost(current_thread, TRUE); /* Disable dynamic thread priority adjustments by Windows, not turbo boosts by the hardware itself */
 
             static timer::cache_state state;
-            static_assert(alignof(timer::cache_state) >= 64, "timer::cache_state must be aligned to 64 bytes to prevent cache-line thrashing (false sharing).");
-            static_assert(std::is_standard_layout<timer::cache_state>::value, "timer::cache_state must be standard layout for predictable memory offsets.");
+            static_assert(alignof(timer::cache_state) >= 64, "VMAware: timer::cache_state must be aligned to 64 bytes to prevent cache-line thrashing (false sharing).");
+            static_assert(std::is_standard_layout<timer::cache_state>::value, "VMAware: timer::cache_state must be standard layout for predictable memory offsets.");
 
             state.counter = 0;
             state.start_test.store(false, std::memory_order_relaxed);
@@ -7038,9 +7038,9 @@ public:
             }
         };
 
-        static_assert(targets.size() == brands_map.size(), "FIRMWARE: 'targets' and 'brands_map' must have the same size.");
-        static_assert(array_validator::verify_no_nulls(targets, 0), "FIRMWARE: 'targets' array contains NULLs.");
-        static_assert(targets.size() == brands_map.size(), "FIRMWARE: The target string array size must match the brands mapping array size.");
+        static_assert(targets.size() == brands_map.size(), "VMAware: 'targets' and 'brands_map' must have the same size.");
+        static_assert(array_validator::verify_no_nulls(targets, 0), "VMAware: 'targets' array contains NULLs.");
+        static_assert(targets.size() == brands_map.size(), "VMAware: The target string array size must match the brands mapping array size.");
 
         /* Track cross-table validation parameters sequentially across buffers */
         bool dsdt_scanned = false;
@@ -9610,7 +9610,7 @@ public:
             BYTE Data[1];
         };
 
-        static_assert(offsetof(KEY_VALUE_PARTIAL_INFORMATION_LOCAL, Data) == 12, "Offset of Data member in KEY_VALUE_PARTIAL_INFORMATION_LOCAL must be exactly 12 bytes.");
+        static_assert(offsetof(KEY_VALUE_PARTIAL_INFORMATION_LOCAL, Data) == 12, "VMAware: Offset of Data member in KEY_VALUE_PARTIAL_INFORMATION_LOCAL must be exactly 12 bytes.");
 
         constexpr size_t header_size = offsetof(KEY_VALUE_PARTIAL_INFORMATION_LOCAL, Data);
         if (result_length <= header_size || result_length > sizeof(buffer)) {
@@ -12615,8 +12615,8 @@ public:
                 /*
                  * KVM_X86_QUIRK_FIX_HYPERCALL_INSN attempts a 3-byte write over the faulting
                  * instruction itself, producing a write #PF (ExceptionInformation[0] == 1)
-                 * whose CR2 (ExceptionInformation[1]) falls within [ExceptionAddress, ExceptionAddress + 3).
-                 * Comparing against insn_addr also stays accurate under MSVC /INCREMENTAL ILT thunks.
+                 * whose CR2 (ExceptionInformation[1]) falls within [ExceptionAddress, ExceptionAddress + 3)
+                 * Comparing against insn_addr also stays accurate under MSVC /INCREMENTAL ILT thunks
                  */
                 const bool is_write_pf = (info.num_params >= 2) && (info.access_type == 1);
                 const bool fault_at_insn =
@@ -12768,8 +12768,8 @@ public:
             return false;
         }
 
-        static_assert(sizeof(iretq_frame) == 16, "iretq_frame size must be exactly 16 bytes for proper hardware exception processing.");
-        static_assert(std::is_standard_layout<iretq_frame>::value, "iretq_frame must follow standard layout rules.");
+        static_assert(sizeof(iretq_frame) == 16, "VMAware: iretq_frame size must be exactly 16 bytes for proper hardware exception processing.");
+        static_assert(std::is_standard_layout<iretq_frame>::value, "VMAware: iretq_frame must follow standard layout rules.");
 
         thread_local static bool hypervisor_detected = true;
         thread_local static u64 saved_rsp = 0;
@@ -13034,10 +13034,10 @@ public:
             };
         #pragma pack(pop)
 
-        static_assert(sizeof(VMAWARE_TBS_CONTEXT_PARAMS) == 4, "VMAWARE_TBS_CONTEXT_PARAMS must be exactly 4 bytes.");
-        static_assert(sizeof(VMAWARE_TBS_CONTEXT_PARAMS2) == 8, "VMAWARE_TBS_CONTEXT_PARAMS2 must be exactly 8 bytes.");
-        static_assert(sizeof(TCG_PCR_EVENT_HEADER) == 32, "TCG_PCR_EVENT_HEADER must be exactly 32 bytes.");
-        static_assert(sizeof(alg_size) == 4, "alg_size must be exactly 4 bytes.");
+        static_assert(sizeof(VMAWARE_TBS_CONTEXT_PARAMS) == 4, "VMAware: VMAWARE_TBS_CONTEXT_PARAMS must be exactly 4 bytes.");
+        static_assert(sizeof(VMAWARE_TBS_CONTEXT_PARAMS2) == 8, "VMAware: VMAWARE_TBS_CONTEXT_PARAMS2 must be exactly 8 bytes.");
+        static_assert(sizeof(TCG_PCR_EVENT_HEADER) == 32, "VMAware: TCG_PCR_EVENT_HEADER must be exactly 32 bytes.");
+        static_assert(sizeof(alg_size) == 4, "VMAware: alg_size must be exactly 4 bytes.");
 
         using tbsi_get_tcg_log_ex_fn = TBS_RESULT(__stdcall*)(UINT32, PBYTE, PUINT32);
         using tbsi_context_create_fn = TBS_RESULT(__stdcall*)(const void*, TBS_HCONTEXT*);
