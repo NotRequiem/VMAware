@@ -11109,9 +11109,13 @@ public:
          */
         auto try_icebp = [&]() noexcept -> bool {
             alignas(16) CONTEXT ctx = {};
-            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS | CONTEXT_CONTROL;
 
             if (!NT_SUCCESS(nt_get_context_thread(current_thread, &ctx))) {
+                return false;
+            }
+
+            if ((ctx.EFlags & 0x100U) != 0) {
                 return false;
             }
 
@@ -11124,6 +11128,7 @@ public:
             const auto old_dr7 = ctx.Dr7;
 
             /* Clean all debug registers to ensure pure trap-class behavior */
+            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
             ctx.Dr0 = 0;
             ctx.Dr1 = 0;
             ctx.Dr2 = 0;
@@ -11137,6 +11142,7 @@ public:
 
             bool rip_failed = false;
             bool step_triggered = false;
+            bool invalid_fault = false;
             const uintptr_t stub_base = reinterpret_cast<uintptr_t>(dbvm_icebp_stub);
 
             struct exception_handler {
@@ -11145,22 +11151,34 @@ public:
                     DWORD exception_code,
                     bool* rip_failed_out,
                     bool* step_triggered_out,
+                    bool* invalid_fault_out,
                     uintptr_t stub_base_addr
                 ) noexcept {
-                    if (exception_code != EXCEPTION_SINGLE_STEP) {
-                        return EXCEPTION_CONTINUE_SEARCH;
+                    if (exception_code == EXCEPTION_SINGLE_STEP) {
+                        if (ep && ep->ContextRecord) {
+                            *step_triggered_out = true;
+                            const uintptr_t exception_rip = static_cast<uintptr_t>(ep->ContextRecord->Rip);
+
+                            if (exception_rip != (stub_base_addr + 1)) {
+                                *rip_failed_out = true;
+                            }
+                        }
+
+                        return EXCEPTION_EXECUTE_HANDLER;
                     }
 
-                    if (ep && ep->ContextRecord) {
-                        *step_triggered_out = true;
-                        const uintptr_t exception_rip = static_cast<uintptr_t>(ep->ContextRecord->Rip);
+                    if (exception_code == EXCEPTION_ILLEGAL_INSTRUCTION || exception_code == EXCEPTION_PRIV_INSTRUCTION) {
+                        if (ep && ep->ContextRecord) {
+                            const uintptr_t exception_rip = static_cast<uintptr_t>(ep->ContextRecord->Rip);
 
-                        if (exception_rip == stub_base_addr) {
-                            *rip_failed_out = true;
+                            if (exception_rip == stub_base_addr) {
+                                *invalid_fault_out = true;
+                                return EXCEPTION_EXECUTE_HANDLER;
+                            }
                         }
                     }
 
-                    return EXCEPTION_EXECUTE_HANDLER;
+                    return EXCEPTION_CONTINUE_SEARCH;
                 }
             };
 
@@ -11172,6 +11190,7 @@ public:
                 GetExceptionCode(),
                 &rip_failed,
                 &step_triggered,
+                &invalid_fault,
                 stub_base
             )) { /* Execution resumes here upon single-step trap */ }
 
@@ -11183,6 +11202,11 @@ public:
             ctx.Dr6 = old_dr6;
             ctx.Dr7 = old_dr7;
             nt_set_context_thread(current_thread, &ctx);
+
+            if (invalid_fault) {
+                vma_debug("DBVM: ICEBP raised #UD/#GP instead of #DB");
+                return true;
+            }
 
             if (!step_triggered) {
                 vma_debug("DBVM: ICEBP exception didn't trigger #DB");
