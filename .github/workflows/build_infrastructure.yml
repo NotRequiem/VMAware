@@ -13,7 +13,6 @@ on:
       - 'CMakeLists.txt'
       - 'auxiliary/test_cli.sh'
       - 'auxiliary/test_cli.ps1'
-      - 'auxiliary/memoize_test.cpp'
   pull_request:
     branches: ["main"]
     paths:
@@ -23,7 +22,6 @@ on:
       - 'CMakeLists.txt'
       - 'auxiliary/test_cli.sh'
       - 'auxiliary/test_cli.ps1'
-      - 'auxiliary/memoize_test.cpp'
   workflow_dispatch:
 
 env:
@@ -301,18 +299,22 @@ jobs:
         include:
           - config: 64-debug
             arch: x64
+            build_config: Debug
             debug_output: ON
             artifact: vmaware64_debug.exe
           - config: 32-debug
             arch: Win32
+            build_config: Debug
             debug_output: ON
             artifact: vmaware32_debug.exe
           - config: 32-release
             arch: Win32
+            build_config: Release
             debug_output: OFF
             artifact: vmaware32_release.exe
           - config: 64-release
             arch: x64
+            build_config: Release
             debug_output: OFF
             artifact: vmaware64_release.exe
 
@@ -327,7 +329,7 @@ jobs:
         run: cmake -B build -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DDEBUG_OUTPUT=${{ matrix.debug_output }}
 
       - name: Build (${{ matrix.config }})
-        run: cmake --build build --config Release
+        run: cmake --build build --config ${{ matrix.build_config }}
 
       - name: Rename binary with commit info
         shell: pwsh
@@ -335,12 +337,13 @@ jobs:
           $shortSha = "${{ github.sha }}".Substring(0,12)
           $run = "${{ github.run_number }}"
           Add-Content $env:GITHUB_ENV "SHORT_SHA=$shortSha"
-          Rename-Item build\Release\vmaware.exe "vmaware_${run}_${shortSha}.exe"
+          Rename-Item "build\${{ matrix.build_config }}\vmaware.exe" "vmaware_${run}_${shortSha}.exe"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: build\Release\vmaware_${{ github.run_number }}_${{ env.SHORT_SHA }}.exe
+          path: build\${{ matrix.build_config }}\vmaware_${{ github.run_number }}_${{ env.SHORT_SHA }}.exe
+          if-no-files-found: error
 
   windows-arm-compilation:
     runs-on: windows-2022
@@ -414,7 +417,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: vmaware_${{ github.run_number }}_${{ env.SHORT_SHA }}.exe
+          path: build\${{ matrix.build_config }}\vmaware_${{ github.run_number }}_${{ env.SHORT_SHA }}.exe
+          if-no-files-found: error
 
   windows-cpp-standard:
     runs-on: windows-2022
@@ -441,7 +445,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure (Unicode x64)
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_CXX_FLAGS="/D \"_UNICODE\""
+        shell: pwsh
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_CXX_FLAGS="-D_UNICODE -DUNICODE"
 
       - name: Build (Unicode Release)
         run: cmake --build build --config Release
@@ -488,6 +493,7 @@ jobs:
       - name: Add ASAN runtime DLLs to PATH
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
             -latest -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
@@ -496,6 +502,7 @@ jobs:
             Sort-Object Name -Descending |
             Select-Object -First 1 -ExpandProperty Name
           $asanDir = "$vsPath\VC\Tools\MSVC\$msvcVersion\bin\Hostx64\x64"
+          if (-not (Test-Path $asanDir)) { throw "ASAN directory not found: $asanDir" }
           Add-Content $env:GITHUB_PATH $asanDir
 
       - name: Full CLI output (ASAN)
@@ -628,53 +635,69 @@ jobs:
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware64_release -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware64_release" }
           Write-Host "=== vmaware64_release ==="
-          & $bin; $true | Out-Null
+          & $bin
+          $global:LASTEXITCODE = 0
 
       - name: Run CLI test suite (vmaware64_release)
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware64_release -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware64_release" }
           pwsh auxiliary/test_cli.ps1 -BIN $bin -TIMEOUT_SECS 10
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Full CLI output (vmaware64_debug)
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware64_debug -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware64_debug" }
           Write-Host "=== vmaware64_debug ==="
-          & $bin; $true | Out-Null
+          & $bin
+          $global:LASTEXITCODE = 0
 
       - name: Run CLI test suite (vmaware64_debug)
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware64_debug -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware64_debug" }
           pwsh auxiliary/test_cli.ps1 -BIN $bin -TIMEOUT_SECS 10
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Full CLI output (vmaware32_release)
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware32_release -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware32_release" }
           Write-Host "=== vmaware32_release ==="
-          & $bin; $true | Out-Null
+          & $bin
+          $global:LASTEXITCODE = 0
 
       - name: Run CLI test suite (vmaware32_release)
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware32_release -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware32_release" }
           pwsh auxiliary/test_cli.ps1 -BIN $bin -TIMEOUT_SECS 10
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Full CLI output (vmaware32_debug)
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware32_debug -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware32_debug" }
           Write-Host "=== vmaware32_debug ==="
-          & $bin; $true | Out-Null
+          & $bin
+          $global:LASTEXITCODE = 0
 
       - name: Run CLI test suite (vmaware32_debug)
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware32_debug -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bin) { throw "Binary not found in build\vmaware32_debug" }
           pwsh auxiliary/test_cli.ps1 -BIN $bin -TIMEOUT_SECS 10
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   vm-output-test-linux:
     needs: [linux]
@@ -863,7 +886,10 @@ jobs:
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware64_release -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
-          $result = (& $bin --detect).Trim()
+          if (-not $bin) { throw "Binary not found in build\vmaware64_release" }
+          $output = & $bin --detect
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $result = ($output -join "`n").Trim()
           if ($result -ne "1") {
             Write-Host "FAIL: --detect expected 1, got '$result'"
             exit 1
@@ -874,7 +900,10 @@ jobs:
         shell: pwsh
         run: |
           $bin = Get-ChildItem build\vmaware64_release -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
-          $result = (& $bin --percent).Trim()
+          if (-not $bin) { throw "Binary not found in build\vmaware64_release" }
+          $output = & $bin --percent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $result = ($output -join "`n").Trim()
           if ($result -ne "100") {
             Write-Host "FAIL: --percent expected 100, got '$result'"
             exit 1
