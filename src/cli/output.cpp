@@ -92,7 +92,7 @@ static bool are_perms_required(const VM::enum_flags flag) {
         case VM::QEMU_USB:
         case VM::KMSG:
         case VM::SMBIOS_VM_BIT:
-        case VM::MMIO_EVEX:
+        case VM::MMIO:
         case VM::NVRAM: return true;
         default: return false;
     }
