@@ -447,6 +447,7 @@
     #include <csetjmp>      
     #include <pthread.h>     
     #include <sched.h>      
+    #include <sys/mman.h>
     #include <cerrno>   
 #elif (VMAWARE_APPLE)
     #if (VMAWARE_X86)
@@ -774,6 +775,7 @@ public:
         TEMPERATURE,
         CGROUP,
         PROCESSES,
+        MMIO_EVEX,
 
         /* Linux and MacOS */
         THREAD_COUNT,
@@ -6611,6 +6613,93 @@ public:
         }
 
         return false;
+    }
+
+
+    /**
+     * @brief Check for KVM x86 emulator #UD on EVEX (0x62) MMIO access
+     * @category Linux, x86_64
+     * @author Implementation by @virtfunc (https://github.com/virtfunc)
+     * @implements VM::MMIO_EVEX
+     */
+    VMAWARE_TECHNIQUE mmio_evex() {
+    #if (VMAWARE_LINUX && VMAWARE_X86_64)
+        /* Verify CPUID and OS XCR0 advertise AVX-512 EVEX + VL before issuing 0x62 instructions */
+        u32 eax = 0, ebx = 0, ecx = 0, edx = 0;
+        cpu::cpuid(eax, ebx, ecx, edx, cpu::leaf::basic_info);
+        if (eax < 7) return false; /* 7 = highest basic leaf we need, the extended feature flags leaf */
+
+        cpu::cpuid(eax, ebx, ecx, edx, cpu::leaf::features);
+        if ((ecx & ((1u << 27) | (1u << 28))) != ((1u << 27) | (1u << 28))) return false; /* CPUID.1:ECX[27] OSXSAVE, [28] AVX */
+
+        u32 xlo = 0, xhi = 0;
+        __asm__ __volatile__("xgetbv" : "=a"(xlo), "=d"(xhi) : "c"(0));
+        (void)xhi;
+        if ((xlo & 0xE6u) != 0xE6u) return false; /* XCR0: 0xE6 = SSE(1) | AVX(2) | opmask(5) | ZMM_Hi256(6) | Hi16_ZMM(7) */
+
+        cpu::cpuid(eax, ebx, ecx, edx, cpu::leaf::ext_features, 0u);
+        if ((ebx & ((1u << 16) | (1u << 31))) != ((1u << 16) | (1u << 31))) return false; /* CPUID.7:EBX[16] AVX512F, [31] AVX512VL */
+
+        /* Locate segment 0, bus 0 ECAM physical base from ACPI MCFG */
+        std::ifstream mcfg("/sys/firmware/acpi/tables/MCFG", std::ios::binary);
+        std::vector<u8> tbl((std::istreambuf_iterator<char>(mcfg)), std::istreambuf_iterator<char>());
+        if (tbl.size() < 60 || std::memcmp(tbl.data(), "MCFG", 4) != 0) return false; /* 60 = 44 byte header + one 16 byte entry */
+
+        u64 ecam_phys = 0;
+        /* 44 = 36 byte ACPI SDT header + 8 reserved bytes, 16 = base(8) + segment(2) + start bus(1) + end bus(1) + reserved(4) */
+        for (size_t off = 44; off + 16 <= tbl.size(); off += 16) {
+            u16 seg = 0;
+            std::memcpy(&seg, tbl.data() + off + 8, sizeof(seg)); /* +8 = PCI segment group */
+            if (seg == 0 && tbl[off + 10] == 0) { /* +10 = start bus number, want segment 0 bus 0 */
+                std::memcpy(&ecam_phys, tbl.data() + off, sizeof(ecam_phys)); /* +0 = ECAM base address */
+                break;
+            }
+        }
+        if (ecam_phys == 0) return false;
+
+        /* Map ECAM strictly read-only so access behavior matches hardware config space reads */
+        const int fd = open("/dev/mem", O_RDONLY | O_SYNC);
+        if (fd < 0) return false;
+        void* const va = mmap(nullptr, 4096, PROT_READ, MAP_SHARED, fd, static_cast<off_t>(ecam_phys)); /* 4096 = one page = 0000:00:00.0 config space */
+        close(fd);
+        if (va == MAP_FAILED) return false;
+
+        /* Run 128-bit EVEX load under SIGILL/SIGSEGV/SIGBUS recovery; KVM emulates MMIO and #UDs on 0x62 */
+        auto probe_evex = [](const void* p) noexcept -> int {
+            static sigjmp_buf env;
+            struct sigaction sa{}, old_ill{}, old_segv{}, old_bus{};
+            sa.sa_handler = [](int sig_num) { siglongjmp(env, sig_num ? sig_num : 1); };
+            sigemptyset(&sa.sa_mask);
+            sigaction(SIGILL, &sa, &old_ill);
+            sigaction(SIGSEGV, &sa, &old_segv);
+            sigaction(SIGBUS, &sa, &old_bus);
+            const int sig = sigsetjmp(env, 1);
+            if (sig == 0) {
+                __asm__ __volatile__(
+                    /* 62 F1 7E 08 6F 00 = vmovdqu32 xmm0 */
+                    ".byte 0x62, 0xf1, 0x7e, 0x08, 0x6f, 0x00"
+                    : : "a"(p) : "xmm0", "memory"
+                );
+            }
+            sigaction(SIGILL, &old_ill, nullptr);
+            sigaction(SIGSEGV, &old_segv, nullptr);
+            sigaction(SIGBUS, &old_bus, nullptr);
+            return sig;
+        };
+
+        /* Baseline check in normal RAM first: only fault if ECAM MMIO traps #UD while RAM passes */
+        alignas(16) static constexpr u8 ram[16]{};
+        const int mmio_sig = (probe_evex(ram) == 0) ? probe_evex(va) : 0;
+        munmap(va, 4096); /* 4096 = the single page mapped above */
+
+        if (mmio_sig == SIGILL) {
+            vma_debug("MMIO_EVEX: #UD (SIGILL) on EVEX ECAM read");
+            return core::add(brand_enum::KVM);
+        }
+        return false;
+    #else
+        return false;
+    #endif
     }
 #endif
 
@@ -15122,6 +15211,7 @@ public:
             case TEMPERATURE:         return "TEMPERATURE";
             case CGROUP:              return "CGROUP";
             case PROCESSES:           return "PROCESSES";
+            case MMIO_EVEX:           return "MMIO_EVEX";
 
             /* Linux and MacOS */
             case THREAD_COUNT:        return "THREAD_COUNT";
@@ -15483,6 +15573,7 @@ inline const std::array<VM::core::technique, VM::enum_size + 1>& VM::core::get_t
             { VM::TEMPERATURE,{ 20, VM::temperature } },
             { VM::CGROUP,{ 70, VM::cgroup } },
             { VM::PROCESSES,{ 40, VM::processes } },
+            { VM::MMIO_EVEX,{ 150, VM::mmio_evex } },
         #endif    
 
         #if (VMAWARE_LINUX || VMAWARE_APPLE)
